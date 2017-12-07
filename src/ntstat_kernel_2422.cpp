@@ -1,5 +1,5 @@
 
-#include "NetworkStatisticsClientBase.hpp"
+#include "NTStatKernelStructHandler.hpp"
 
 // definitions from darwin-xnu/bsd/net/ntstat.h kernel header
 

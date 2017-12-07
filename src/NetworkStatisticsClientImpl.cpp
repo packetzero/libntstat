@@ -6,7 +6,7 @@
 //  Copyright © 2017 Ziften. All rights reserved.
 //
 
-#include "NetworkStatisticsClientBase.hpp"
+#include "NTStatKernelStructHandler.hpp"
 
 #include <sys/types.h>
 #include <sys/ioctl.h>
@@ -240,7 +240,7 @@ int _readNextMessage()
 
     nstat_msg_hdr *ns = (nstat_msg_hdr *) c;
 
-    if (_logTrace) printf("T RECV type:%s(%d) context:%d len:%d\n", msg_name(ns->type).c_str(), ns->type, ns->context, num_bytes);
+    if (_logTrace) printf("T RECV type:%s(%d) context:%llu len:%d\n", msg_name(ns->type).c_str(), ns->type, ns->context, num_bytes);
 
     switch (ns->type)
     {
