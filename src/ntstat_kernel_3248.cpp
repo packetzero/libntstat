@@ -5,13 +5,13 @@
 
 #include <uuid/uuid.h>
 
-#include "ntstat_kernel_3789.h"
+#include "ntstat_kernel_3248.h"
 
 #include <string.h>
 #include <vector>
 using namespace std;
 
-class NTStatKernel3789 : public NTStatKernelStructHandler
+class NTStatKernel3248 : public NTStatKernelStructHandler
 {
 public:
   //--------------------------------------------------------------------
@@ -26,7 +26,7 @@ public:
     msg.srcref = srcRef;
     msg.hdr.context = CONTEXT_GET_SRC_DESC;
   }
-  
+
   //--------------------------------------------------------------------
   // write ADD_ADD_SRCS message to dest
   //--------------------------------------------------------------------
@@ -37,9 +37,9 @@ public:
     msg.provider = providerId ;
     msg.hdr.type = NSTAT_MSG_TYPE_ADD_ALL_SRCS;
     msg.hdr.context = CONTEXT_ADD_ALL_SRCS;
-    
+
   }
-  
+
   //--------------------------------------------------------------------
   // extract srcRef, providerId (if possible) from message
   //--------------------------------------------------------------------
@@ -65,7 +65,7 @@ public:
         break;
     }
   }
-  
+
   //--------------------------------------------------------------------
   // TCP: populate dest with message data
   //--------------------------------------------------------------------
@@ -77,7 +77,7 @@ public:
     dest->key.ifindex = tcp->ifindex;
     dest->key.ipproto = IPPROTO_TCP;
     dest->key.isV6 = (tcp->local.v4.sin_family == AF_INET6);
-    
+
     if (tcp->local.v4.sin_family == AF_INET6)
     {
       dest->key.lport = tcp->local.v6.sin6_port;
@@ -93,13 +93,13 @@ public:
     dest->states.txwindow = tcp->txwindow;
     dest->states.txcwindow = tcp->txcwindow;
     dest->states.state = tcp->state;
-    
+
     dest->process.pid = tcp->pid;
     dest->process.upid = tcp->upid;
 
     strcpy(dest->process.name, ((tcp->pid > 0 && tcp->pname[0]) ? tcp->pname : ""));
   }
-  
+
   //--------------------------------------------------------------------
   // UDP: populate dest with message data
   //--------------------------------------------------------------------
@@ -107,11 +107,11 @@ public:
   {
     nstat_msg_src_description *msg = (nstat_msg_src_description*)hdr;
     nstat_udp_descriptor*udp = (nstat_udp_descriptor*)msg->data;
-    
+
     dest->key.ifindex = udp->ifindex;
     dest->key.ipproto = IPPROTO_UDP;
     dest->key.isV6 = (udp->local.v4.sin_family == AF_INET6);
-    
+
     if (udp->local.v4.sin_family == AF_INET6)
     {
       dest->key.lport = udp->local.v6.sin6_port;
@@ -124,12 +124,12 @@ public:
       dest->key.local.addr4 = udp->local.v4.sin_addr;
       dest->key.remote.addr4 = udp->remote.v4.sin_addr;
     }
-    
+
     dest->process.pid = udp->pid;
     dest->process.upid = udp->upid;
     strcpy(dest->process.name, ((udp->pid > 0 && udp->pname[0]) ? udp->pname : ""));
   }
-  
+
   //--------------------------------------------------------------------
   // populate dest with message counts data
   //--------------------------------------------------------------------
@@ -141,10 +141,10 @@ public:
     dest.rxpackets = msg->counts.nstat_rxpackets;
     dest.txpackets = msg->counts.nstat_txpackets;
   }
-  
+
 };
 
 
-NTStatKernelStructHandler* NewNTStatKernel3789() {
-  return new NTStatKernel3789();
+NTStatKernelStructHandler* NewNTStatKernel3248() {
+  return new NTStatKernel3248();
 }

@@ -1,10 +1,7 @@
 //
-//  main.cpp
-//  demo
+//  libntstat demo
 //
-//  Created by Alex Malone on 12/7/17.
-//  Copyright © 2017 AlexMalone. All rights reserved.
-//
+//  Copyright © 2017 Alex Malone. All rights reserved.
 
 #include "../include/NetworkStatisticsClient.hpp"
 #include <stdio.h>
@@ -12,24 +9,26 @@
 #include <string>
 using namespace std;
 
-string addr2text ( const in_addr& Addr );
-string addr2text ( const in6_addr& Addr );
 string stream2text (const NTStatStreamKey& s);
 
+/*
+ * Implementing this listener allows receipt of events.
+ */
 class MyNetstatListener : public NetworkStatisticsListener
 {
   virtual void onStreamAdded(const NTStatStream *stream)
   {
-    printf("A   pid:%d (%s) stream %s\n", stream->process.pid, stream->process.name, stream2text(stream->key).c_str());
+    printf(" + %s pid:%d (%s)\n", stream2text(stream->key).c_str(), stream->process.pid, stream->process.name);
   }
   virtual void onStreamRemoved(const NTStatStream *stream)
   {
-    printf(" D  pid:%d (%s) stream %s\n", stream->process.pid, stream->process.name, stream2text(stream->key).c_str());
-
+    printf(" - %s pid:%d (%s)\n", stream2text(stream->key).c_str(), stream->process.pid, stream->process.name);
+    printf("   bytes (tx/rx):%llu/%llu  packets:%llu/%llu\n",stream->stats.txbytes, stream->stats.rxbytes, stream->stats.txpackets, stream->stats.rxpackets);
   }
   virtual void onStreamStatsUpdate(const NTStatStream *stream)
   {
-    printf("  S pid:%d (%s) stream %s\n", stream->process.pid, stream->process.name, stream2text(stream->key).c_str());
+    printf("   %s pid:%d (%s)\n", stream2text(stream->key).c_str(), stream->process.pid, stream->process.name);
+    printf("   bytes (tx/rx):%llu/%llu  packets:%llu/%llu\n",stream->stats.txbytes, stream->stats.rxbytes, stream->stats.txpackets, stream->stats.rxpackets);
 
   }
 
@@ -37,18 +36,26 @@ class MyNetstatListener : public NetworkStatisticsListener
 
 int main(int argc, const char * argv[])
 {
+  // create
+
   MyNetstatListener listener = MyNetstatListener();
   NetworkStatisticsClient* netstatClient =  NetworkStatisticsClientNew(&listener);
 
+  // connect to ntstat via kernel control module socket
+  
   if (false == netstatClient->connectToKernel()) {
     printf("Failed to establish network.statistics system control socket\n");
     return 2;
   }
-  
+
+  // in a real app, we would want to run this in a dedicated thread
+
   netstatClient->run();
   
   return 0;
 }
+
+// ==================== helper functions ======================
 
 #include <arpa/inet.h>
 
@@ -60,8 +67,6 @@ string addr2text ( const in_addr& Addr )
   return "?";
 }
 
-
-
 string addr2text ( const in6_addr& Addr )
 {
   char IPv6AddressAsString[INET6_ADDRSTRLEN];     //buffer needs 46 characters min
@@ -72,7 +77,7 @@ string addr2text ( const in6_addr& Addr )
 
 string stream2text (const NTStatStreamKey& s)
 {
-  char tmp[64];
+  char tmp[256];
   string val = s.ipproto == IPPROTO_TCP ? "TCP " : "UDP ";
   if (s.isV6)
   {

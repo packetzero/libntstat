@@ -19,9 +19,12 @@
 #include <sys/utsname.h>
 #include <sys/sys_domain.h>
 #include <sys/kern_control.h>
-//#include <net/if_utun.h>
 
+NTStatKernelStructHandler* NewNTStatKernel2422();
+NTStatKernelStructHandler* NewNTStatKernel2782();
 NTStatKernelStructHandler* NewNTStatKernel3789();
+NTStatKernelStructHandler* NewNTStatKernel3248();
+NTStatKernelStructHandler* NewNTStatKernel4570();
 
 #define      NET_STAT_CONTROL_NAME   "com.apple.network.statistics"
 
@@ -144,7 +147,19 @@ public:
     _keepRunning = true;
     unsigned int xnuVersion = getXnuVersion();
     
-    _structHandler = NewNTStatKernel3789();
+    printf("XNU version:%d\n", xnuVersion);
+    
+    if (xnuVersion > 3800)
+      _structHandler = NewNTStatKernel4570();
+    else if (xnuVersion > 3300)
+      _structHandler = NewNTStatKernel3789();
+    else if (xnuVersion > 3200)
+      _structHandler = NewNTStatKernel3248();
+    else if (xnuVersion > 2700)
+      _structHandler = NewNTStatKernel2782();
+    else
+      _structHandler = NewNTStatKernel2422();
+
 
     vector<uint8_t> vec;
     _structHandler->writeAddAllSrc(vec, NSTAT_PROVIDER_TCP_KERNEL);

@@ -11,6 +11,17 @@
 		05313D1E1FD9B079006FB69A /* NetworkStatisticsClientBase.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 05313D1D1FD9B079006FB69A /* NetworkStatisticsClientBase.cpp */; };
 		05313D1F1FD9CDFC006FB69A /* libntstat.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 05C21B361FD9A59000DDAC9B /* libntstat.a */; };
 		05313D211FD9D3F2006FB69A /* ntstat_kernel_3789.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 05313D201FD9D3F2006FB69A /* ntstat_kernel_3789.cpp */; };
+		05313D2B1FD9F5A5006FB69A /* ntstat_kernel_3248.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 05313D221FD9F5A3006FB69A /* ntstat_kernel_3248.cpp */; };
+		05313D2C1FD9F5A5006FB69A /* ntstat_kernel_3789.h in Headers */ = {isa = PBXBuildFile; fileRef = 05313D231FD9F5A4006FB69A /* ntstat_kernel_3789.h */; };
+		05313D2D1FD9F5A5006FB69A /* ntstat_kernel_2782.h in Headers */ = {isa = PBXBuildFile; fileRef = 05313D241FD9F5A4006FB69A /* ntstat_kernel_2782.h */; };
+		05313D2E1FD9F5A5006FB69A /* ntstat_kernel_2422.h in Headers */ = {isa = PBXBuildFile; fileRef = 05313D251FD9F5A4006FB69A /* ntstat_kernel_2422.h */; };
+		05313D2F1FD9F5A5006FB69A /* ntstat_kernel_4570.h in Headers */ = {isa = PBXBuildFile; fileRef = 05313D261FD9F5A4006FB69A /* ntstat_kernel_4570.h */; };
+		05313D301FD9F5A5006FB69A /* ntstat_kernel_3248.h in Headers */ = {isa = PBXBuildFile; fileRef = 05313D271FD9F5A4006FB69A /* ntstat_kernel_3248.h */; };
+		05313D311FD9F5A5006FB69A /* ntstat_kernel_4570.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 05313D281FD9F5A4006FB69A /* ntstat_kernel_4570.cpp */; };
+		05313D321FD9F5A5006FB69A /* ntstat_kernel_2050.h in Headers */ = {isa = PBXBuildFile; fileRef = 05313D291FD9F5A5006FB69A /* ntstat_kernel_2050.h */; };
+		05313D331FD9F5A5006FB69A /* ntstat_kernel_3247.h in Headers */ = {isa = PBXBuildFile; fileRef = 05313D2A1FD9F5A5006FB69A /* ntstat_kernel_3247.h */; };
+		05313D361FD9F7AB006FB69A /* ntstat_kernel_2782.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 05313D341FD9F7AB006FB69A /* ntstat_kernel_2782.cpp */; };
+		05313D371FD9F7AB006FB69A /* ntstat_kernel_2422.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 05313D351FD9F7AB006FB69A /* ntstat_kernel_2422.cpp */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -36,12 +47,22 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
-		05313D0B1FD9A657006FB69A /* src */ = {isa = PBXFileReference; lastKnownFileType = folder; path = src; sourceTree = "<group>"; };
 		05313D0C1FD9A665006FB69A /* include */ = {isa = PBXFileReference; lastKnownFileType = folder; path = include; sourceTree = "<group>"; };
 		05313D111FD9A99E006FB69A /* demo */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = demo; sourceTree = BUILT_PRODUCTS_DIR; };
 		05313D131FD9A99E006FB69A /* main.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = main.cpp; sourceTree = "<group>"; };
 		05313D1D1FD9B079006FB69A /* NetworkStatisticsClientBase.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; name = NetworkStatisticsClientBase.cpp; path = src/NetworkStatisticsClientBase.cpp; sourceTree = "<group>"; };
 		05313D201FD9D3F2006FB69A /* ntstat_kernel_3789.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; name = ntstat_kernel_3789.cpp; path = src/ntstat_kernel_3789.cpp; sourceTree = "<group>"; };
+		05313D221FD9F5A3006FB69A /* ntstat_kernel_3248.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; name = ntstat_kernel_3248.cpp; path = src/ntstat_kernel_3248.cpp; sourceTree = "<group>"; };
+		05313D231FD9F5A4006FB69A /* ntstat_kernel_3789.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = ntstat_kernel_3789.h; path = src/ntstat_kernel_3789.h; sourceTree = "<group>"; };
+		05313D241FD9F5A4006FB69A /* ntstat_kernel_2782.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = ntstat_kernel_2782.h; path = src/ntstat_kernel_2782.h; sourceTree = "<group>"; };
+		05313D251FD9F5A4006FB69A /* ntstat_kernel_2422.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = ntstat_kernel_2422.h; path = src/ntstat_kernel_2422.h; sourceTree = "<group>"; };
+		05313D261FD9F5A4006FB69A /* ntstat_kernel_4570.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = ntstat_kernel_4570.h; path = src/ntstat_kernel_4570.h; sourceTree = "<group>"; };
+		05313D271FD9F5A4006FB69A /* ntstat_kernel_3248.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = ntstat_kernel_3248.h; path = src/ntstat_kernel_3248.h; sourceTree = "<group>"; };
+		05313D281FD9F5A4006FB69A /* ntstat_kernel_4570.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; name = ntstat_kernel_4570.cpp; path = src/ntstat_kernel_4570.cpp; sourceTree = "<group>"; };
+		05313D291FD9F5A5006FB69A /* ntstat_kernel_2050.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = ntstat_kernel_2050.h; path = src/ntstat_kernel_2050.h; sourceTree = "<group>"; };
+		05313D2A1FD9F5A5006FB69A /* ntstat_kernel_3247.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = ntstat_kernel_3247.h; path = src/ntstat_kernel_3247.h; sourceTree = "<group>"; };
+		05313D341FD9F7AB006FB69A /* ntstat_kernel_2782.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; name = ntstat_kernel_2782.cpp; path = src/ntstat_kernel_2782.cpp; sourceTree = "<group>"; };
+		05313D351FD9F7AB006FB69A /* ntstat_kernel_2422.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; name = ntstat_kernel_2422.cpp; path = src/ntstat_kernel_2422.cpp; sourceTree = "<group>"; };
 		05C21B361FD9A59000DDAC9B /* libntstat.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = libntstat.a; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -82,10 +103,20 @@
 		05C21B2D1FD9A59000DDAC9B = {
 			isa = PBXGroup;
 			children = (
+				05313D351FD9F7AB006FB69A /* ntstat_kernel_2422.cpp */,
+				05313D341FD9F7AB006FB69A /* ntstat_kernel_2782.cpp */,
+				05313D291FD9F5A5006FB69A /* ntstat_kernel_2050.h */,
+				05313D251FD9F5A4006FB69A /* ntstat_kernel_2422.h */,
+				05313D241FD9F5A4006FB69A /* ntstat_kernel_2782.h */,
+				05313D2A1FD9F5A5006FB69A /* ntstat_kernel_3247.h */,
+				05313D221FD9F5A3006FB69A /* ntstat_kernel_3248.cpp */,
+				05313D271FD9F5A4006FB69A /* ntstat_kernel_3248.h */,
+				05313D231FD9F5A4006FB69A /* ntstat_kernel_3789.h */,
+				05313D281FD9F5A4006FB69A /* ntstat_kernel_4570.cpp */,
+				05313D261FD9F5A4006FB69A /* ntstat_kernel_4570.h */,
 				05313D201FD9D3F2006FB69A /* ntstat_kernel_3789.cpp */,
 				05313D1D1FD9B079006FB69A /* NetworkStatisticsClientBase.cpp */,
 				05313D0C1FD9A665006FB69A /* include */,
-				05313D0B1FD9A657006FB69A /* src */,
 				05313D121FD9A99E006FB69A /* demo */,
 				05C21B371FD9A59000DDAC9B /* Products */,
 				05313D1A1FD9AEFC006FB69A /* Frameworks */,
@@ -108,6 +139,13 @@
 			isa = PBXHeadersBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				05313D331FD9F5A5006FB69A /* ntstat_kernel_3247.h in Headers */,
+				05313D301FD9F5A5006FB69A /* ntstat_kernel_3248.h in Headers */,
+				05313D2D1FD9F5A5006FB69A /* ntstat_kernel_2782.h in Headers */,
+				05313D2C1FD9F5A5006FB69A /* ntstat_kernel_3789.h in Headers */,
+				05313D2E1FD9F5A5006FB69A /* ntstat_kernel_2422.h in Headers */,
+				05313D321FD9F5A5006FB69A /* ntstat_kernel_2050.h in Headers */,
+				05313D2F1FD9F5A5006FB69A /* ntstat_kernel_4570.h in Headers */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -199,7 +237,11 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				05313D371FD9F7AB006FB69A /* ntstat_kernel_2422.cpp in Sources */,
+				05313D361FD9F7AB006FB69A /* ntstat_kernel_2782.cpp in Sources */,
+				05313D311FD9F5A5006FB69A /* ntstat_kernel_4570.cpp in Sources */,
 				05313D211FD9D3F2006FB69A /* ntstat_kernel_3789.cpp in Sources */,
+				05313D2B1FD9F5A5006FB69A /* ntstat_kernel_3248.cpp in Sources */,
 				05313D1E1FD9B079006FB69A /* NetworkStatisticsClientBase.cpp in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

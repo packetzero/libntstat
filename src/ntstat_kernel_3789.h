@@ -1,7 +1,17 @@
-
 // definitions from bsd/net/ntstat.h kernel header
 // https://github.com/apple/darwin-xnu
 // git checkout xnu-3789.70.16
+// Sierra 10.12
+
+
+// bsd/netinet/tcp.h
+struct tcp_conn_status {
+  unsigned int    probe_activated : 1;
+  unsigned int    write_probe_failed : 1;
+  unsigned int    read_probe_failed : 1;
+  unsigned int    conn_probe_failed : 1;
+};
+#define    IFNAMSIZ    16
 
 #pragma pack(push, 4)
 #define __NSTAT_REVISION__      8
@@ -27,18 +37,18 @@ typedef struct nstat_counts
   u_int64_t       nstat_rxbytes   __attribute__((aligned(8)));
   u_int64_t       nstat_txpackets __attribute__((aligned(8)));
   u_int64_t       nstat_txbytes   __attribute__((aligned(8)));
-  
+
   u_int32_t       nstat_rxduplicatebytes;
   u_int32_t       nstat_rxoutoforderbytes;
   u_int32_t       nstat_txretransmit;
-  
+
   u_int32_t       nstat_connectattempts;
   u_int32_t       nstat_connectsuccesses;
-  
+
   u_int32_t       nstat_min_rtt;
   u_int32_t       nstat_avg_rtt;
   u_int32_t       nstat_var_rtt;
-  
+
   u_int64_t       nstat_cell_rxbytes      __attribute__((aligned(8)));
   u_int64_t       nstat_cell_txbytes      __attribute__((aligned(8)));
   u_int64_t       nstat_wifi_rxbytes      __attribute__((aligned(8)));
@@ -47,14 +57,6 @@ typedef struct nstat_counts
   u_int64_t       nstat_wired_txbytes     __attribute__((aligned(8)));
 } nstat_counts;
 
-// bsd/netinet/tcp.h
-struct tcp_conn_status {
-  unsigned int    probe_activated : 1;
-  unsigned int    write_probe_failed : 1;
-  unsigned int    read_probe_failed : 1;
-  unsigned int    conn_probe_failed : 1;
-};
-
 typedef struct nstat_tcp_descriptor
 {
   union
@@ -62,17 +64,17 @@ typedef struct nstat_tcp_descriptor
     struct sockaddr_in      v4;
     struct sockaddr_in6     v6;
   } local;
-  
+
   union
   {
     struct sockaddr_in      v4;
     struct sockaddr_in6     v6;
   } remote;
-  
+
   u_int32_t       ifindex;
-  
+
   u_int32_t       state;
-  
+
   u_int32_t       sndbufsize;
   u_int32_t       sndbufused;
   u_int32_t       rcvbufsize;
@@ -83,13 +85,13 @@ typedef struct nstat_tcp_descriptor
   u_int32_t       traffic_class;
   u_int32_t       traffic_mgt_flags;
   char            cc_algo[16];
-  
+
   u_int64_t       upid;
   u_int32_t       pid;
   char            pname[64];
   u_int64_t       eupid;
   u_int32_t       epid;
-  
+
   uuid_t          uuid;
   uuid_t          euuid;
   uuid_t          vuuid;
@@ -104,25 +106,25 @@ typedef struct nstat_udp_descriptor
     struct sockaddr_in      v4;
     struct sockaddr_in6     v6;
   } local;
-  
+
   union
   {
     struct sockaddr_in      v4;
     struct sockaddr_in6     v6;
   } remote;
-  
+
   u_int32_t       ifindex;
-  
+
   u_int32_t       rcvbufsize;
   u_int32_t       rcvbufused;
   u_int32_t       traffic_class;
-  
+
   u_int64_t       upid;
   u_int32_t       pid;
   char            pname[64];
   u_int64_t       eupid;
   u_int32_t       epid;
-  
+
   uuid_t          uuid;
   uuid_t          euuid;
   uuid_t          vuuid;
@@ -164,7 +166,7 @@ typedef struct nstat_ifnet_desc_cellular_status
 #define NSTAT_IFNET_DESC_CELL_UL_RETXT_LEVEL_LOW        2
 #define NSTAT_IFNET_DESC_CELL_UL_RETXT_LEVEL_MEDIUM     3
 #define NSTAT_IFNET_DESC_CELL_UL_RETXT_LEVEL_HIGH       4
-  
+
   u_int32_t ul_bytes_lost; /* % of total bytes lost on uplink in Q10
                             format */
   u_int32_t ul_min_queue_size; /* minimum bytes in queue */
@@ -219,7 +221,7 @@ typedef struct nstat_ifnet_desc_wifi_status {
 #define NSTAT_IFNET_DESC_WIFI_UL_RETXT_LEVEL_LOW        2
 #define NSTAT_IFNET_DESC_WIFI_UL_RETXT_LEVEL_MEDIUM     3
 #define NSTAT_IFNET_DESC_WIFI_UL_RETXT_LEVEL_HIGH       4
-  
+
   u_int32_t ul_bytes_lost; /* % of total bytes lost on uplink in Q10
                             format */
   u_int32_t ul_error_rate; /* % of bytes dropped on uplink after many
@@ -255,8 +257,6 @@ typedef struct nstat_ifnet_desc_link_status
     nstat_ifnet_desc_wifi_status            wifi;
   } u;
 } nstat_ifnet_desc_link_status;
-
-#define    IFNAMSIZ    16
 
 #ifndef IF_DESCSIZE
 #define IF_DESCSIZE 128
@@ -375,5 +375,3 @@ typedef struct nstat_msg_sysinfo_counts
 } __attribute__((packed)) nstat_msg_sysinfo_counts;
 
 #pragma pack(pop)
-
-
