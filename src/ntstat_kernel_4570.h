@@ -676,7 +676,7 @@ typedef struct nstat_sysinfo_add_param
 #pragma mark -- Network Statistics User Client --
 
 #define	NET_STAT_CONTROL_NAME	"com.apple.network.statistics"
-/*
+
 enum
 {
 	// generic response messages
@@ -700,7 +700,7 @@ enum
 	,NSTAT_MSG_TYPE_SRC_COUNTS				= 10004
 	,NSTAT_MSG_TYPE_SYSINFO_COUNTS			= 10005
 	,NSTAT_MSG_TYPE_SRC_UPDATE				= 10006
-};*/
+};
 
 enum
 {

@@ -5,11 +5,12 @@
 
 #include "../include/NetworkStatisticsClient.hpp"
 #include <stdio.h>
-
+#include <netinet/tcp_fsm.h>
 #include <string>
 using namespace std;
 
 string stream2text (const NTStatStreamKey& s);
+string timestr();
 
 /*
  * Implementing this listener allows receipt of events.
@@ -18,20 +19,32 @@ class MyNetstatListener : public NetworkStatisticsListener
 {
   virtual void onStreamAdded(const NTStatStream *stream)
   {
-    printf(" + %s pid:%d (%s)\n", stream2text(stream->key).c_str(), stream->process.pid, stream->process.name);
+    log(stream, '+');
   }
   virtual void onStreamRemoved(const NTStatStream *stream)
   {
-    printf(" - %s pid:%d (%s)\n", stream2text(stream->key).c_str(), stream->process.pid, stream->process.name);
-    printf("   bytes (tx/rx):%llu/%llu  packets:%llu/%llu\n",stream->stats.txbytes, stream->stats.rxbytes, stream->stats.txpackets, stream->stats.rxpackets);
+    log(stream, '-');
   }
   virtual void onStreamStatsUpdate(const NTStatStream *stream)
   {
-    printf("   %s pid:%d (%s)\n", stream2text(stream->key).c_str(), stream->process.pid, stream->process.name);
-    printf("   bytes (tx/rx):%llu/%llu  packets:%llu/%llu\n",stream->stats.txbytes, stream->stats.rxbytes, stream->stats.txpackets, stream->stats.rxpackets);
-
+    log(stream, ' ');
   }
 
+  void log(const NTStatStream* stream, char displayChar)
+  {
+    if (stream->key.ipproto == IPPROTO_TCP && stream->states.state == TCPS_LISTEN)
+    {
+      printf(" @ %s pid:%u (%s) LISTEN TCP port:%u\n", timestr().c_str(), stream->process.pid, stream->process.name, ntohs(stream->key.lport));
+    }
+    else
+    {
+      printf(" %c %s %s pid:%u (%s)\n", displayChar, timestr().c_str(),
+           stream2text(stream->key).c_str(), stream->process.pid, stream->process.name);
+      if (stream->stats.rxpackets > 0 || stream->stats.txpackets > 0)
+        printf("   bytes (tx/rx):%llu/%llu  packets:%llu/%llu\n",stream->stats.txbytes, stream->stats.rxbytes, stream->stats.txpackets, stream->stats.rxpackets);
+    }
+  }
+  
 };
 
 int main(int argc, const char * argv[])
@@ -49,8 +62,8 @@ int main(int argc, const char * argv[])
   }
 
   // in a real app, we would want to run this in a dedicated thread
-
-  netstatClient->run();
+  bool wantStats = true;
+  netstatClient->run(wantStats);
   
   return 0;
 }
@@ -96,4 +109,14 @@ string stream2text (const NTStatStreamKey& s)
     val += tmp;
 }
   return val;
+}
+
+#include <time.h>
+string timestr()
+{
+  char timestamp[64]="";
+  time_t now = time(NULL);
+  struct tm *tm = localtime(&now);
+  strftime(timestamp, 63, "%H:%M:%S", tm);
+  return string(timestamp);
 }

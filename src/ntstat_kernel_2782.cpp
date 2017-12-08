@@ -23,7 +23,7 @@ public:
     nstat_msg_get_src_description &msg = (nstat_msg_get_src_description&)*dest.data();
 
     msg.hdr.type = NSTAT_MSG_TYPE_GET_SRC_DESC;
-    msg.srcref = srcRef;
+    msg.srcref = (uint32_t)srcRef;
     msg.hdr.context = CONTEXT_GET_SRC_DESC;
   }
 
@@ -46,6 +46,18 @@ public:
 
   virtual void writeAddAllUdpSrc(vector<uint8_t> &dest) {
     writeAddAllSrc(dest, NSTAT_PROVIDER_UDP);
+  }
+
+  //--------------------------------------------------------------------
+  // write QUERY_SRC message to dest
+  //--------------------------------------------------------------------
+  virtual void writeQueryAllSrc(std::vector<uint8_t> &dest) {
+    dest.resize(sizeof(nstat_msg_query_src_req));
+    nstat_msg_query_src_req &msg = (nstat_msg_query_src_req&)*dest.data();
+    
+    msg.hdr.type= NSTAT_MSG_TYPE_QUERY_SRC   ;
+    msg.srcref= NSTAT_SRC_REF_ALL;
+    msg.hdr.context = CONTEXT_QUERY_SRC;
   }
 
   //--------------------------------------------------------------------
@@ -122,7 +134,6 @@ public:
     dest->states.state = tcp->state;
 
     dest->process.pid = tcp->pid;
-    dest->process.upid = tcp->upid;
 
     strcpy(dest->process.name, ((tcp->pid > 0 && tcp->pname[0]) ? tcp->pname : ""));
   }
@@ -153,7 +164,6 @@ public:
     }
 
     dest->process.pid = udp->pid;
-    dest->process.upid = udp->upid;
     strcpy(dest->process.name, ((udp->pid > 0 && udp->pname[0]) ? udp->pname : ""));
   }
 

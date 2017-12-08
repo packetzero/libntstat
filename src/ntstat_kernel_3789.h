@@ -27,6 +27,32 @@ enum
   ,NSTAT_PROVIDER_SYSINFO = 7
 };
 
+enum
+{
+  // generic response messages
+  NSTAT_MSG_TYPE_SUCCESS                  = 0
+  ,NSTAT_MSG_TYPE_ERROR                   = 1
+  
+  // Requests
+  ,NSTAT_MSG_TYPE_ADD_SRC                 = 1001
+  ,NSTAT_MSG_TYPE_ADD_ALL_SRCS    = 1002
+  ,NSTAT_MSG_TYPE_REM_SRC                 = 1003
+  ,NSTAT_MSG_TYPE_QUERY_SRC               = 1004
+  ,NSTAT_MSG_TYPE_GET_SRC_DESC    = 1005
+  
+  // Responses/Notfications
+  ,NSTAT_MSG_TYPE_SRC_ADDED               = 10001
+  ,NSTAT_MSG_TYPE_SRC_REMOVED             = 10002
+  ,NSTAT_MSG_TYPE_SRC_DESC                = 10003
+  ,NSTAT_MSG_TYPE_SRC_COUNTS              = 10004
+};
+
+enum
+{
+  NSTAT_SRC_REF_ALL  = 0xffffffffffffffffULL
+  ,NSTAT_SRC_REF_INVALID  = 0
+};
+
 
 #pragma pack(push, 4)
 #define __NSTAT_REVISION__      8

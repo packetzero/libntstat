@@ -20,13 +20,50 @@
 #include <sys/sys_domain.h>
 #include <sys/kern_control.h>
 
+#include <string.h> // memcmp
+#include <string>
+#include <map>
+using namespace std;
+
+// pthread macros
+
+#include <pthread.h>
+#define MUTEX_T pthread_mutex_t
+#define MUINIT(pMu) pthread_mutex_init ( (pMu), 0)
+#define MULOCK(pMu) pthread_mutex_lock ( pMu)
+#define MUUNLOCK(pMu) pthread_mutex_unlock ( pMu)
+
+// references to the factory functions to allocate struct handlers for kernel versions
+
 NTStatKernelStructHandler* NewNTStatKernel2422();
 NTStatKernelStructHandler* NewNTStatKernel2782();
 NTStatKernelStructHandler* NewNTStatKernel3789();
 NTStatKernelStructHandler* NewNTStatKernel3248();
 NTStatKernelStructHandler* NewNTStatKernel4570();
 
+// minimum ntstat.h definitions needed here
+
 #define      NET_STAT_CONTROL_NAME   "com.apple.network.statistics"
+
+enum
+{
+  // generic response messages
+  NSTAT_MSG_TYPE_SUCCESS                  = 0
+  ,NSTAT_MSG_TYPE_ERROR                   = 1
+  
+  // Requests
+  ,NSTAT_MSG_TYPE_ADD_SRC                 = 1001
+  ,NSTAT_MSG_TYPE_ADD_ALL_SRCS            = 1002
+  ,NSTAT_MSG_TYPE_REM_SRC                 = 1003
+  ,NSTAT_MSG_TYPE_QUERY_SRC               = 1004
+  ,NSTAT_MSG_TYPE_GET_SRC_DESC            = 1005
+  
+  // Responses/Notfications
+  ,NSTAT_MSG_TYPE_SRC_ADDED               = 10001
+  ,NSTAT_MSG_TYPE_SRC_REMOVED             = 10002
+  ,NSTAT_MSG_TYPE_SRC_DESC                = 10003
+  ,NSTAT_MSG_TYPE_SRC_COUNTS              = 10004
+};
 
 
 typedef struct nstat_msg_error
@@ -36,34 +73,58 @@ typedef struct nstat_msg_error
   u_int8_t        reserved[4];
 } nstat_msg_error;
 
-const int BUFSIZE = 2048;
+// tracking of messages
+/*
+struct MsgContext
+{
+  uint16_t seqnum;
+  uint16_t msgtype;
+  uint16_t loc;
+  uint16_t pad;
+
+  uint64_t to_i() { return *(uint64_t*)this; }
+};
+
+struct QMsg
+{
+  MsgContext       context;
+  vector<uint8_t>  msg;
+
+  QMsg(uint32_t msgtype_, uint64_t ctx_, uint16_t seqnum_, vector<uint8_t> v) : seqnum(seqnum_), contextid(ctx_ & 0x0FFFFFFFFUL), msgtype(msgtype_) { }
+};
+*/
+// Make these true to add more debug logging
 
 static bool _logDbg = false;
 static bool _logTrace = false;
 static bool _logErrors = false;
 
-#include <string>
-#include <map>
-using namespace std;
-
+const int BUFSIZE = 2048;
 string msg_name(uint32_t msg_type);
 unsigned int getXnuVersion();
 
+/*
+ * Wrapper around NTStatStream so we can track srcRef
+ */
 struct NetstatSource
 {
-  NetstatSource(uint64_t srcRef, uint32_t providerId) : _srcRef(srcRef), _providerId(providerId) {}
+  NetstatSource(uint64_t srcRef, uint32_t providerId) : _srcRef(srcRef), _providerId(providerId), _haveDesc(false), obj() {}
 
   uint64_t _srcRef;
   uint32_t _providerId;
+  bool     _haveDesc;
   NTStatStream obj;
 };
 
+/*
+ * Implementation of NetworkStatisticsClient
+ */
 class NetworkStatisticsClientImpl : public NetworkStatisticsClient
 {
 public:
-  NetworkStatisticsClientImpl(NetworkStatisticsListener* listener): _listener(listener), _map(), _keepRunning(false), _fd(0), _udpAdded(false)
+  NetworkStatisticsClientImpl(NetworkStatisticsListener* listener): _listener(listener), _map(), _keepRunning(false), _fd(0), _udpAdded(false), _withCounts(false), _gotCounts(false) //, _seqnum(0), _qmsgMap()
   {
-
+    MUINIT(&_mapMutex);
   }
 
   //------------------------------------------------------------------------
@@ -124,13 +185,22 @@ public:
     return false;
   }
 
+  //----------------------------------------------------------
+  // return true if we have a socket connection active
+  //----------------------------------------------------------
   bool isConnected()
   {
     return (_fd > 0);
   }
 
-  void run()
+  //----------------------------------------------------------
+  // run
+  // @param withCounts If true, subscribe to SRC_COUNT updates
+  //----------------------------------------------------------
+  void run(bool withCounts)
   {
+    _withCounts = withCounts;
+
     if (!isConnected()) {
       printf("E run() not connected.\n"); return;
     }
@@ -176,59 +246,136 @@ private:
   {
     nstat_msg_hdr* hdr = (nstat_msg_hdr*)pstruct;
 
-    if (_logTrace) printf("T SEND type:%s(%d) context:%d\n", msg_name(hdr->type).c_str(), hdr->type, hdr->context );
+    
+    if (_logTrace) printf("T SEND type:%s(%d) context:%llu\n", msg_name(hdr->type).c_str(), hdr->type, hdr->context );
 
     ssize_t rc = write (_fd, pstruct, structlen);
 
-    if (_logErrors && rc < structlen) printf("E ERROR on SEND write returned %d expecting %d\n", rc, structlen);
+    if (_logErrors && rc < structlen) printf("E ERROR on SEND write returned %d expecting %d\n", (int)rc, (int)structlen);
 
     return rc;
   }
 
-void _removeSource(uint64_t srcRef)
-{
-  auto fit = _map.find(srcRef);
-  if (fit != _map.end()) {
-    _map.erase(fit);
-    delete fit->second;
+  /*
+  //---------------------------------------------------------------
+  // write message to socket fd
+  // returns true if successful
+  //---------------------------------------------------------------
+  bool SEND(QMsg &qm)
+  {
+    nstat_msg_hdr* hdr = (nstat_msg_hdr*)qm.msg.data();
+
+    if (_logTrace) printf("T SEND type:%s(%d) context:%llu\n", msg_name(hdr->type).c_str(), hdr->type, hdr->context );
+
+    ssize_t rc = write (_fd, qm.msg.data(), qm.msg.size());
+
+    return (rc == qm.msg.size());
   }
-}
-
-void _resetSource(uint64_t srcRef, uint32_t providerId)
-{
-  _removeSource(srcRef);
-
-  NetstatSource* src = new NetstatSource(srcRef, providerId);
-  _map[srcRef] = src;
-}
-
-NetstatSource* _lookupSource(uint64_t srcRef)
-{
-  auto fit = _map.find(srcRef);
-  if (fit != _map.end()) {
-    return fit->second;
+  
+  //----------------------------------------------------------
+  //
+  //----------------------------------------------------------
+  void ENQ(vector<uint8_t> &vec)
+  {
+    nstat_msg_hdr* hdr = (nstat_msg_hdr*)vec.data();
+    QMsg item = QMsg(hdr->type, hdr->context, ++_seqnum, vec);
+    _outq.push_back(item);
   }
 
-  return 0L;
-}
+  //----------------------------------------------------------
+  //
+  //----------------------------------------------------------
+  void sendNextMsg()
+  {
+    if (_outq.empty()) return;
 
-void onSrcAdded(uint32_t providerId, uint64_t srcRef)
-{
-  _resetSource(srcRef, providerId);
-}
+    QMsg &qm = *_outq.begin();
+    if (SEND(qm))
+    {
+      _qmsgMap[qm.context.to_i()] = qm;
+    }
+    else
+    {
+      // error ... drop on floor
+    }
+    _outq.erase(_outq.begin());
+  }
+*/
+  
+  //----------------------------------------------------------
+  // removeSource
+  //----------------------------------------------------------
+  void _removeSource(uint64_t srcRef)
+  {
+    MULOCK(&_mapMutex);
 
+    auto fit = _map.find(srcRef);
+    if (fit != _map.end()) {
+      _map.erase(fit);
+      delete fit->second;
+    }
+    
+    MUUNLOCK(&_mapMutex);
+  }
 
-int _readNextMessage()
-{
-  uint64_t srcRef = 0L;
-  uint32_t providerId = 0;
-  char c[BUFSIZE];
+  //----------------------------------------------------------
+  // resetSource
+  //----------------------------------------------------------
+  void _resetSource(uint64_t srcRef, uint32_t providerId)
+  {
+    _removeSource(srcRef);
 
-  int num_bytes = (int)read (_fd, c, BUFSIZE);
+    NetstatSource* src = new NetstatSource(srcRef, providerId);
 
-  if (_logDbg) printf("D READ %d bytes\n", num_bytes);
+    MULOCK(&_mapMutex);
 
-  if (num_bytes <= 0) return -1;
+    _map[srcRef] = src;
+
+    MUUNLOCK(&_mapMutex);
+  }
+
+  //----------------------------------------------------------
+  // lookupSource
+  //----------------------------------------------------------
+  NetstatSource* _lookupSource(uint64_t srcRef)
+  {
+    NetstatSource* retval = 0L;
+
+    MULOCK(&_mapMutex);
+
+    auto fit = _map.find(srcRef);
+    if (fit != _map.end()) {
+      retval = fit->second;
+    }
+
+    MUUNLOCK(&_mapMutex);
+    return retval;
+  }
+
+  //----------------------------------------------------------
+  // Allocate new NTStreamSource and place in map
+  //----------------------------------------------------------
+  void onSrcAdded(uint32_t providerId, uint64_t srcRef)
+  {
+    _resetSource(srcRef, providerId);
+  }
+
+  //----------------------------------------------------------
+  // _readNextMessage()
+  // The KCQ socket is really a queue.  This reads the next
+  // message off the queue
+  //----------------------------------------------------------
+  int _readNextMessage()
+  {
+    uint64_t srcRef = 0L;
+    uint32_t providerId = 0;
+    char c[BUFSIZE];
+
+    int num_bytes = (int)read (_fd, c, BUFSIZE);
+
+    if (_logDbg) printf("D READ %d bytes\n", num_bytes);
+
+    if (num_bytes <= 0) return -1;
 
     nstat_msg_hdr *ns = (nstat_msg_hdr *) c;
 
@@ -240,7 +387,13 @@ int _readNextMessage()
       case NSTAT_MSG_TYPE_SRC_ADDED:
       {
         _structHandler->getSrcRef(ns, num_bytes, srcRef, providerId);
+
         onSrcAdded(providerId, srcRef);
+
+        vector<uint8_t> vec;
+        _structHandler->writeSrcDesc(vec, providerId, srcRef);
+        SEND(vec.data(), vec.size());
+
         break;
       }
       case NSTAT_MSG_TYPE_SRC_REMOVED:
@@ -261,8 +414,20 @@ int _readNextMessage()
 
         if (source != 0L)
         {
-          if (_structHandler->readSrcDesc(ns, num_bytes, &source->obj)) {
+          if (_structHandler->readSrcDesc(ns, num_bytes, &source->obj))
+          {
+            if (source->obj.key.isV6 == false && source->obj.key.local.addr4.s_addr == 0) {
+              printf("desc for zero address\n");
+            }
+            // misc cleanups
+
+            if (source->obj.process.pid == 0) strcpy(source->obj.process.name, "kernel_task");
+
+            // notify application
+
+            source->_haveDesc = true;
             _listener->onStreamAdded(&source->obj);
+
           } else {
             if (_logDbg) printf("E not TCP or UDP provider:%u\n", providerId);
           }
@@ -276,15 +441,22 @@ int _readNextMessage()
 
         NetstatSource* source = _lookupSource(srcRef);
         if (source != 0L) {
+
+          if (source->obj.key.isV6 == false && source->obj.key.local.addr4.s_addr == 0) {
+            printf("counts for zero address\n");
+          }
+          
           _structHandler->readCounts(ns, num_bytes, source->obj.stats);
-          _listener->onStreamStatsUpdate(&source->obj);
+          if (source->_haveDesc) {
+            
+            _listener->onStreamStatsUpdate(&source->obj);
+          }
         }
         break;
       }
       case NSTAT_MSG_TYPE_SUCCESS:
         if (ns->context == CONTEXT_QUERY_SRC) {
-          // no sources (count == 0) OR nstat_control_reporting_allowed is FALSE
-          //process_response_query_src(c, num_bytes);
+          // ?
         } else if (ns->context == CONTEXT_ADD_ALL_SRCS) {
 
           // now add UDP
@@ -294,52 +466,30 @@ int _readNextMessage()
             vector<uint8_t> vec;
             _structHandler->writeAddAllUdpSrc(vec);
             SEND(vec.data(), vec.size());
+          } else {
+            
+            if (_withCounts) {
+              if (!_gotCounts)
+              {
+                _gotCounts = true;
+                vector<uint8_t> vec;
+                _structHandler->writeQueryAllSrc(vec);
+                SEND(vec.data(), vec.size());
+              }
+            }
           }
 
         } else {
           if (_logDbg) printf("E unhandled success response\n");
         }
 
-        /*
-        // Got all sources, or all counts
-        // if we were getting sources, ask now for all descriptions
-
-        if (!tcpAdded)
-        { tcpAdded++;
-
-          addAll (fd, NSTAT_PROVIDER_UDP_USERLAND);
-        }
-
-        else { if (!udpAdded) udpAdded++; }
-
-        if (tcpAdded && udpAdded )
-        {
-          if (!gettingCounts)
-          {
-            memset(&qsreq, 0, sizeof(qsreq));
-
-            qsreq.hdr.type= NSTAT_MSG_TYPE_QUERY_SRC   ; // 1004
-            qsreq.srcref= NSTAT_SRC_REF_ALL;
-            qsreq.hdr.context = 1005; // This way I can tell if errors get returned for dead sources
-
-
-            rc = write (fd, &qsreq, sizeof(qsreq));
-            gettingCounts++;
-          }
-          else  gotCounts++;
-
-        }
-
-        */
         break;
 
       case NSTAT_MSG_TYPE_ERROR:
       {
         // Error message
         nstat_msg_error* perr = (nstat_msg_error*)c;
-        if (_logTrace) printf("T error code:%d (0x%x) \n", perr->error, perr->error);
-//        remove_ntstat_source(ns->context);
-        //Error message - these are usually for dead sources
+        if (true) printf("T error code:%d (0x%x) \n", perr->error, perr->error);
       }
         return 0;//-1;
         break;
@@ -350,22 +500,37 @@ int _readNextMessage()
 
     }
 
-  return 0;
-}
+    return 0;
+  }
 
   virtual void stop() { _keepRunning = false; }
 
-  NetworkStatisticsListener* _listener;
+  // private data members
+  
+  NetworkStatisticsListener*    _listener;
 
   map<uint64_t, NetstatSource*> _map;
 
-  bool _keepRunning;
+  bool                          _keepRunning;
 
-  int _fd;
+  int                           _fd;
 
-  NTStatKernelStructHandler* _structHandler;
+  NTStatKernelStructHandler*    _structHandler;
 
-  bool _udpAdded;
+  bool                          _udpAdded;
+  
+  bool                          _withCounts;    // application wants stat counters
+  
+  bool                          _gotCounts;     // have request counts
+
+  MUTEX_T                       _mapMutex;
+  /*
+  vector<QMsg>                  _outq;  // messages that need to be sent
+
+  uint16_t                      _seqnum;
+  
+  map<uint64_t, QMsg>           _qmsgMap; // messages waiting for response
+  */
 
 };
 
@@ -374,14 +539,21 @@ int _readNextMessage()
 
 
 
-
+//----------------------------------------------------------
+// Return new instance of impl
+//----------------------------------------------------------
 NetworkStatisticsClient* NetworkStatisticsClientNew(NetworkStatisticsListener* l)
 {
-  // TODO: add implementations for each kernel change
   return new NetworkStatisticsClientImpl(l);
 }
 
-
+//----------------------------------------------------------
+// getXnuVersion
+//
+// uname() will yield a version string like "xnu-3789.71.6~1/RELEASE_X86_64"
+// This function extracts the integer after 'xnu-'.  3789 in this
+// example.
+//----------------------------------------------------------
 unsigned int getXnuVersion()
 {
    struct utsname name;
@@ -394,10 +566,13 @@ unsigned int getXnuVersion()
     return 2000;
   }
 
-  unsigned int val = atol(p + 4);
+  unsigned int val = (unsigned int)atol(p + 4);
   return val;
 }
 
+//----------------------------------------------------------
+// string name for message type
+//----------------------------------------------------------
 string msg_name(uint32_t msg_type)
 {
   switch(msg_type) {
@@ -409,9 +584,6 @@ string msg_name(uint32_t msg_type)
     case NSTAT_MSG_TYPE_REM_SRC: return "REM_SRC";
     case NSTAT_MSG_TYPE_QUERY_SRC: return "QUERY_SRC";
     case NSTAT_MSG_TYPE_GET_SRC_DESC: return "GET_SRC_DESC";
-      //case NSTAT_MSG_TYPE_SET_FILTER: return "SET_FILTER";
-      //case NSTAT_MSG_TYPE_GET_UPDATE: return "GET_UPDATE";
-      //case NSTAT_MSG_TYPE_SUBSCRIBE_SYSINFO: return "SUBSCRIBE_SYSINFO";
 
     case NSTAT_MSG_TYPE_SRC_ADDED: return "SRC_ADDED";
     case NSTAT_MSG_TYPE_SRC_REMOVED: return "SRC_REMOVED";
@@ -423,16 +595,10 @@ string msg_name(uint32_t msg_type)
   return "?";
 }
 
-#include <string.h> // memcmp
-
-/*
-  uint8_t     isV6;
-  uint8_t     ipproto;
-  uint16_t    port;
-  uint32_t    ifindex;
-  addr_t      local;
-  addr_t      remote;
-*/
+//----------------------------------------------------------
+// less-than operator for NTStatStreamKey
+// so applications can use it in std::map
+//----------------------------------------------------------
 bool NTStatStreamKey::operator<(const NTStatStreamKey& b) const
 {
   if (isV6 < b.isV6) return true;

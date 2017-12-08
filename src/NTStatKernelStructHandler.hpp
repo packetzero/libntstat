@@ -1,8 +1,11 @@
-#ifndef _NETWORK_STATISTICS_CLIENT_BASE_HPP_
-#define _NETWORK_STATISTICS_CLIENT_BASE_HPP_
+#ifndef _NT_STAT_KERNEL_STRUCT_HANDLER_H_
+#define _NT_STAT_KERNEL_STRUCT_HANDLER_H_
 
 #include <stdint.h>
+#include <vector>
 #include "../include/NetworkStatisticsClient.hpp"
+
+// the message header is consistent across versions, so defining here
 
 typedef struct nstat_msg_hdr
 {
@@ -12,50 +15,58 @@ typedef struct nstat_msg_hdr
         uint16_t       flags;
 } nstat_msg_hdr;
 
-enum
-{
-  // generic response messages
-  NSTAT_MSG_TYPE_SUCCESS                  = 0
-  ,NSTAT_MSG_TYPE_ERROR                   = 1
-
-  // Requests
-  ,NSTAT_MSG_TYPE_ADD_SRC                 = 1001
-  ,NSTAT_MSG_TYPE_ADD_ALL_SRCS    = 1002
-  ,NSTAT_MSG_TYPE_REM_SRC                 = 1003
-  ,NSTAT_MSG_TYPE_QUERY_SRC               = 1004
-  ,NSTAT_MSG_TYPE_GET_SRC_DESC    = 1005
-
-  // Responses/Notfications
-  ,NSTAT_MSG_TYPE_SRC_ADDED               = 10001
-  ,NSTAT_MSG_TYPE_SRC_REMOVED             = 10002
-  ,NSTAT_MSG_TYPE_SRC_DESC                = 10003
-  ,NSTAT_MSG_TYPE_SRC_COUNTS              = 10004
-};
+// contexts shared between NetworkStatisticsClient implementation and struct handlers
 
 #define CONTEXT_QUERY_SRC    9995
 #define CONTEXT_ADD_ALL_SRCS 9996
 #define CONTEXT_GET_SRC_DESC 9997
 
-#include <vector>
+class MsgDest
+{
+public:
+  virtual void send(nstat_msg_hdr* msg, size_t len, uint64_t context, int num = 1) = 0;
+};
 
+/*
+ * Abstraction for reading and writing versioned kernel structs.
+ * In XNU-3789 (NSTAT_REVISION 8), srcRef became uint64_t. Prior versions
+ * need to convert to uint32_t.
+ */
 class NTStatKernelStructHandler
 {
 public:
 
+  /*
+   * write NSTAT_MSG_TYPE_GET_SRC_DESC to vector
+   */
   virtual void writeSrcDesc(std::vector<uint8_t> &dest, uint64_t providerId, uint64_t srcRef ) = 0;
 
+  /*
+   * write NSTAT_MSG_TYPE_ADD_ALL_SRCS for TCP or UDP
+   */
   virtual void writeAddAllTcpSrc(std::vector<uint8_t> &dest) = 0;
   virtual void writeAddAllUdpSrc(std::vector<uint8_t> &dest) = 0;
 
-//  virtual void _write_query_src() = 0;
+  /*
+   * write NSTAT_MSG_TYPE_QUERY_SRC for all
+   */
+  virtual void writeQueryAllSrc(std::vector<uint8_t> &dest) = 0;
 
+  /*
+   * Extract from msg and populate srcRef and providerId (if in message).
+   */
   virtual void getSrcRef(nstat_msg_hdr* msg, int structlen, uint64_t &srcRef, uint32_t &providerId) = 0;
 
+  /*
+   * Read src desc and populate relevant fields in dest.
+   */
   virtual bool readSrcDesc(nstat_msg_hdr*msg, int structlen, NTStatStream* dest ) = 0;
 
+  /*
+   * Update dest counts using msg.
+   */
   virtual void readCounts(nstat_msg_hdr*msg, int structlen, NTStatCounters& dest ) = 0;
 
 };
 
-
-#endif // _NETWORK_STATISTICS_CLIENT_BASE_HPP_
+#endif // _NT_STAT_KERNEL_STRUCT_HANDLER_H_

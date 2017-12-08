@@ -32,10 +32,10 @@ typedef struct nstat_counts
 	u_int32_t	nstat_rxduplicatebytes;
 	u_int32_t	nstat_rxoutoforderbytes;
 	u_int32_t	nstat_txretransmit;
-	
+
 	u_int32_t	nstat_connectattempts;
 	u_int32_t	nstat_connectsuccesses;
-	
+
 	u_int32_t	nstat_min_rtt;
 	u_int32_t	nstat_avg_rtt;
 	u_int32_t	nstat_var_rtt;
@@ -92,17 +92,17 @@ typedef struct nstat_tcp_descriptor
 		struct sockaddr_in	v4;
 		struct sockaddr_in6	v6;
 	} local;
-	
+
 	union
 	{
 		struct sockaddr_in	v4;
 		struct sockaddr_in6	v6;
 	} remote;
-	
+
 	u_int32_t	ifindex;
-	
+
 	u_int32_t	state;
-	
+
 	u_int32_t	sndbufsize;
 	u_int32_t	sndbufused;
 	u_int32_t	rcvbufsize;
@@ -111,7 +111,7 @@ typedef struct nstat_tcp_descriptor
 	u_int32_t	txwindow;
 	u_int32_t	txcwindow;
 	u_int32_t	traffic_class;
-	
+
 	u_int64_t	upid;
 	u_int32_t	pid;
 	char		pname[64];
@@ -131,19 +131,19 @@ typedef struct nstat_udp_descriptor
 		struct sockaddr_in	v4;
 		struct sockaddr_in6	v6;
 	} local;
-	
+
 	union
 	{
 		struct sockaddr_in	v4;
 		struct sockaddr_in6	v6;
 	} remote;
-	
+
 	u_int32_t	ifindex;
-	
+
 	u_int32_t	rcvbufsize;
 	u_int32_t	rcvbufused;
 	u_int32_t	traffic_class;
-	
+
 	u_int64_t	upid;
 	u_int32_t	pid;
 	char		pname[64];
@@ -159,31 +159,31 @@ typedef struct nstat_route_descriptor
 	u_int64_t	id;
 	u_int64_t	parent_id;
 	u_int64_t	gateway_id;
-	
+
 	union
 	{
 		struct sockaddr_in	v4;
 		struct sockaddr_in6	v6;
 		struct sockaddr		sa;
 	} dst;
-	
+
 	union
 	{
 		struct sockaddr_in	v4;
 		struct sockaddr_in6	v6;
 		struct sockaddr		sa;
 	} mask;
-	
+
 	union
 	{
 		struct sockaddr_in	v4;
 		struct sockaddr_in6	v6;
 		struct sockaddr		sa;
 	} gateway;
-	
+
 	u_int32_t	ifindex;
 	u_int32_t	flags;
-	
+
 } nstat_route_descriptor;
 
 typedef struct nstat_ifnet_add_param
@@ -208,13 +208,13 @@ typedef struct nstat_ifnet_descriptor
 
 #define	NET_STAT_CONTROL_NAME	"com.apple.network.statistics"
 
-/*
+
 enum
 {
 	// generic response messages
 	NSTAT_MSG_TYPE_SUCCESS			= 0
 	,NSTAT_MSG_TYPE_ERROR			= 1
-	
+
 	// Requests
 	,NSTAT_MSG_TYPE_ADD_SRC			= 1001
 	,NSTAT_MSG_TYPE_ADD_ALL_SRCS		= 1002
@@ -222,14 +222,14 @@ enum
 	,NSTAT_MSG_TYPE_QUERY_SRC		= 1004
 	,NSTAT_MSG_TYPE_GET_SRC_DESC		= 1005
 	,NSTAT_MSG_TYPE_SET_FILTER 		= 1006
-	
+
 	// Responses/Notfications
 	,NSTAT_MSG_TYPE_SRC_ADDED		= 10001
 	,NSTAT_MSG_TYPE_SRC_REMOVED		= 10002
 	,NSTAT_MSG_TYPE_SRC_DESC		= 10003
 	,NSTAT_MSG_TYPE_SRC_COUNTS		= 10004
 };
-*/
+
 
 enum
 {
