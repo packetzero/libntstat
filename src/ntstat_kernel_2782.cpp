@@ -40,6 +40,14 @@ public:
 
   }
 
+  virtual void writeAddAllTcpSrc(vector<uint8_t> &dest) {
+    writeAddAllSrc(dest, NSTAT_PROVIDER_TCP);
+  }
+
+  virtual void writeAddAllUdpSrc(vector<uint8_t> &dest) {
+    writeAddAllSrc(dest, NSTAT_PROVIDER_UDP);
+  }
+
   //--------------------------------------------------------------------
   // extract srcRef, providerId (if possible) from message
   //--------------------------------------------------------------------
@@ -65,6 +73,25 @@ public:
         break;
     }
   }
+
+
+
+    //--------------------------------------------------------------------
+    // populate dest with message data
+    //--------------------------------------------------------------------
+    virtual bool readSrcDesc(nstat_msg_hdr*hdr, int structlen, NTStatStream* dest )
+    {
+      nstat_msg_src_description *msg = (nstat_msg_src_description*)hdr;
+      if (msg->provider == NSTAT_PROVIDER_TCP) {
+        readTcpSrcDesc(hdr, structlen, dest);
+      } else if (msg->provider == NSTAT_PROVIDER_UDP) {
+        readUdpSrcDesc(hdr, structlen, dest);
+      } else {
+        // ??
+        return false;
+      }
+      return true;
+    }
 
   //--------------------------------------------------------------------
   // TCP: populate dest with message data

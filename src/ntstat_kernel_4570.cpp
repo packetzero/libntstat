@@ -40,6 +40,14 @@ public:
 
   }
 
+  virtual void writeAddAllTcpSrc(vector<uint8_t> &dest) {
+    writeAddAllSrc(dest, NSTAT_PROVIDER_TCP_KERNEL);
+  }
+
+  virtual void writeAddAllUdpSrc(vector<uint8_t> &dest) {
+    writeAddAllSrc(dest, NSTAT_PROVIDER_UDP_KERNEL);
+  }
+
   //--------------------------------------------------------------------
   // extract srcRef, providerId (if possible) from message
   //--------------------------------------------------------------------
@@ -64,6 +72,23 @@ public:
         printf("E getSrcRef not implemented for type %d\n", msg->type);
         break;
     }
+  }
+
+
+  //--------------------------------------------------------------------
+  // populate dest with message data
+  //--------------------------------------------------------------------
+  virtual bool readSrcDesc(nstat_msg_hdr*hdr, int structlen, NTStatStream* dest )
+  {
+    nstat_msg_src_description *msg = (nstat_msg_src_description*)hdr;
+    if (msg->provider == NSTAT_PROVIDER_TCP_KERNEL || msg->provider == NSTAT_PROVIDER_TCP_USERLAND) {
+      readTcpSrcDesc(hdr, structlen, dest);
+    } else if (msg->provider == NSTAT_PROVIDER_UDP_KERNEL || msg->provider == NSTAT_PROVIDER_UDP_USERLAND) {
+      readUdpSrcDesc(hdr, structlen, dest);
+    } else {
+      // ??
+    }
+    return true;
   }
 
   //--------------------------------------------------------------------

@@ -28,16 +28,6 @@ NTStatKernelStructHandler* NewNTStatKernel4570();
 
 #define      NET_STAT_CONTROL_NAME   "com.apple.network.statistics"
 
-enum
-{
-  NSTAT_PROVIDER_ROUTE    = 1
-  ,NSTAT_PROVIDER_TCP_KERNEL  = 2
-  ,NSTAT_PROVIDER_TCP_USERLAND = 3
-  ,NSTAT_PROVIDER_UDP_KERNEL  = 4
-  ,NSTAT_PROVIDER_UDP_USERLAND = 5
-  ,NSTAT_PROVIDER_IFNET  = 6
-  ,NSTAT_PROVIDER_SYSINFO = 7
-};
 
 typedef struct nstat_msg_error
 {
@@ -49,8 +39,8 @@ typedef struct nstat_msg_error
 const int BUFSIZE = 2048;
 
 static bool _logDbg = false;
-static bool _logTrace = true;
-static bool _logErrors = true;
+static bool _logTrace = false;
+static bool _logErrors = false;
 
 #include <string>
 #include <map>
@@ -62,7 +52,7 @@ unsigned int getXnuVersion();
 struct NetstatSource
 {
   NetstatSource(uint64_t srcRef, uint32_t providerId) : _srcRef(srcRef), _providerId(providerId) {}
-  
+
   uint64_t _srcRef;
   uint32_t _providerId;
   NTStatStream obj;
@@ -71,54 +61,55 @@ struct NetstatSource
 class NetworkStatisticsClientImpl : public NetworkStatisticsClient
 {
 public:
-  NetworkStatisticsClientImpl(NetworkStatisticsListener* listener): _listener(listener), _map(), _keepRunning(false), _fd(0) {
-    
+  NetworkStatisticsClientImpl(NetworkStatisticsListener* listener): _listener(listener), _map(), _keepRunning(false), _fd(0), _udpAdded(false)
+  {
+
   }
-  
+
   //------------------------------------------------------------------------
   // returns true on success, false otherwise
   //------------------------------------------------------------------------
   bool connectToKernel()
   {
     // create socket
-    
+
     if ((_fd = socket(PF_SYSTEM, SOCK_DGRAM, SYSPROTO_CONTROL)) == -1) {
       fprintf(stderr,"socket(SYSPROTO_CONTROL): %s", strerror(errno));
       return false;
-      
+
     }
-    
+
     // init ctl_info
-    
+
     struct ctl_info ctlInfo;
     memset(&ctlInfo, 0, sizeof(ctlInfo));
-    
+
     // copy name and make sure the name isn't too long
-    
+
     if (strlcpy(ctlInfo.ctl_name, NET_STAT_CONTROL_NAME, sizeof(ctlInfo.ctl_name)) >=
         sizeof(ctlInfo.ctl_name)) {
       fprintf(stderr,"CONTROL NAME too long");
       return false;
     }
-    
+
     // iotcl ctl info
     if (ioctl(_fd, CTLIOCGINFO, &ctlInfo)) { //} == -1) {
       fprintf(stderr,"ioctl(CTLIOCGINFO): %s", strerror(errno));
       close(_fd);
       return false;
     }
-    
+
     // connect socket
-    
+
     struct sockaddr_ctl sc;
     memset(&sc, 0, sizeof(sc));
     sc.sc_id = ctlInfo.ctl_id;
     sc.sc_len = sizeof(sc);
     sc.sc_family = AF_SYSTEM;
     sc.ss_sysaddr = AF_SYS_CONTROL;
-    
+
     sc.sc_unit = 0 ;           /* zero means unspecified */
-    
+
     if (connect(_fd, (struct sockaddr *)&sc, sizeof(sc)) != 0)
     {
       fprintf(stderr,"connect(AF_SYS_CONTROL): %s\n", strerror(errno));
@@ -126,13 +117,13 @@ public:
       if (_logDbg) printf("socket id:%d unit:%d\n", ctlInfo.ctl_id, sc.sc_unit);
       return true;
     }
-    
+
     // no dice
-    
+
     close(_fd);
     return false;
   }
-  
+
   bool isConnected()
   {
     return (_fd > 0);
@@ -143,12 +134,12 @@ public:
     if (!isConnected()) {
       printf("E run() not connected.\n"); return;
     }
-    
+
     _keepRunning = true;
     unsigned int xnuVersion = getXnuVersion();
-    
+
     printf("XNU version:%d\n", xnuVersion);
-    
+
     if (xnuVersion > 3800)
       _structHandler = NewNTStatKernel4570();
     else if (xnuVersion > 3300)
@@ -162,35 +153,35 @@ public:
 
 
     vector<uint8_t> vec;
-    _structHandler->writeAddAllSrc(vec, NSTAT_PROVIDER_TCP_KERNEL);
+    _structHandler->writeAddAllTcpSrc(vec);
     SEND(vec.data(), vec.size());
-  
+
     while (_keepRunning)
     {
       _readNextMessage();
     }
-    
+
     close(_fd);
     _fd = 0;
   }
 
-  
-  
+
+
 private:
-  
+
   //---------------------------------------------------------------
   // write struct to socket fd
   //---------------------------------------------------------------
   ssize_t SEND(void *pstruct, size_t structlen)
   {
     nstat_msg_hdr* hdr = (nstat_msg_hdr*)pstruct;
-    
+
     if (_logTrace) printf("T SEND type:%s(%d) context:%d\n", msg_name(hdr->type).c_str(), hdr->type, hdr->context );
-    
+
     ssize_t rc = write (_fd, pstruct, structlen);
-    
+
     if (_logErrors && rc < structlen) printf("E ERROR on SEND write returned %d expecting %d\n", rc, structlen);
-    
+
     return rc;
   }
 
@@ -199,13 +190,14 @@ void _removeSource(uint64_t srcRef)
   auto fit = _map.find(srcRef);
   if (fit != _map.end()) {
     _map.erase(fit);
+    delete fit->second;
   }
 }
 
 void _resetSource(uint64_t srcRef, uint32_t providerId)
 {
   _removeSource(srcRef);
-  
+
   NetstatSource* src = new NetstatSource(srcRef, providerId);
   _map[srcRef] = src;
 }
@@ -216,7 +208,7 @@ NetstatSource* _lookupSource(uint64_t srcRef)
   if (fit != _map.end()) {
     return fit->second;
   }
-  
+
   return 0L;
 }
 
@@ -255,22 +247,27 @@ int _readNextMessage()
       {
         _structHandler->getSrcRef(ns, num_bytes, srcRef, providerId);
         NetstatSource* source = _lookupSource(srcRef);
+
         if (source != 0L) {
           _listener->onStreamRemoved(&source->obj);
         }
+
         break;
       }
       case NSTAT_MSG_TYPE_SRC_DESC:
       {
         _structHandler->getSrcRef(ns, num_bytes, srcRef, providerId);
         NetstatSource* source = _lookupSource(srcRef);
-        if (source != 0L) {
-          if (providerId == NSTAT_PROVIDER_TCP_KERNEL || providerId == NSTAT_PROVIDER_TCP_USERLAND)
-            _structHandler->readTcpSrcDesc(ns, num_bytes, &source->obj);
-          else
-            _structHandler->readUdpSrcDesc(ns, num_bytes, &source->obj);
-          _listener->onStreamAdded(&source->obj);
+
+        if (source != 0L)
+        {
+          if (_structHandler->readSrcDesc(ns, num_bytes, &source->obj)) {
+            _listener->onStreamAdded(&source->obj);
+          } else {
+            if (_logDbg) printf("E not TCP or UDP provider:%u\n", providerId);
+          }
         }
+
         break;
       }
       case NSTAT_MSG_TYPE_SRC_COUNTS:
@@ -288,8 +285,21 @@ int _readNextMessage()
         if (ns->context == CONTEXT_QUERY_SRC) {
           // no sources (count == 0) OR nstat_control_reporting_allowed is FALSE
           //process_response_query_src(c, num_bytes);
-        } else
-          printf("E unhandled success response\n");
+        } else if (ns->context == CONTEXT_ADD_ALL_SRCS) {
+
+          // now add UDP
+
+          if (!_udpAdded) {
+            _udpAdded = true;
+            vector<uint8_t> vec;
+            _structHandler->writeAddAllUdpSrc(vec);
+            SEND(vec.data(), vec.size());
+          }
+
+        } else {
+          if (_logDbg) printf("E unhandled success response\n");
+        }
+
         /*
         // Got all sources, or all counts
         // if we were getting sources, ask now for all descriptions
@@ -342,19 +352,21 @@ int _readNextMessage()
 
   return 0;
 }
-  
+
   virtual void stop() { _keepRunning = false; }
 
   NetworkStatisticsListener* _listener;
 
   map<uint64_t, NetstatSource*> _map;
-  
+
   bool _keepRunning;
 
   int _fd;
-  
+
   NTStatKernelStructHandler* _structHandler;
-  
+
+  bool _udpAdded;
+
 };
 
 
@@ -373,15 +385,15 @@ NetworkStatisticsClient* NetworkStatisticsClientNew(NetworkStatisticsListener* l
 unsigned int getXnuVersion()
 {
    struct utsname name;
-   
+
    uname (&name);
-  
+
   char *p = strstr(name.version, "xnu-");
   if (0L == p) {
     // unexpected
     return 2000;
   }
-  
+
   unsigned int val = atol(p + 4);
   return val;
 }
@@ -391,7 +403,7 @@ string msg_name(uint32_t msg_type)
   switch(msg_type) {
     case NSTAT_MSG_TYPE_ERROR: return "ERROR";
     case NSTAT_MSG_TYPE_SUCCESS: return "SUCCESS";
-      
+
     case NSTAT_MSG_TYPE_ADD_SRC: return "ADD_SRC";
     case NSTAT_MSG_TYPE_ADD_ALL_SRCS: return "ADD_ALL_SRC";
     case NSTAT_MSG_TYPE_REM_SRC: return "REM_SRC";
@@ -400,7 +412,7 @@ string msg_name(uint32_t msg_type)
       //case NSTAT_MSG_TYPE_SET_FILTER: return "SET_FILTER";
       //case NSTAT_MSG_TYPE_GET_UPDATE: return "GET_UPDATE";
       //case NSTAT_MSG_TYPE_SUBSCRIBE_SYSINFO: return "SUBSCRIBE_SYSINFO";
-      
+
     case NSTAT_MSG_TYPE_SRC_ADDED: return "SRC_ADDED";
     case NSTAT_MSG_TYPE_SRC_REMOVED: return "SRC_REMOVED";
     case NSTAT_MSG_TYPE_SRC_DESC: return "SRC_DESC";
@@ -425,19 +437,19 @@ bool NTStatStreamKey::operator<(const NTStatStreamKey& b) const
 {
   if (isV6 < b.isV6) return true;
   if (isV6 > b.isV6) return false;
-  
+
   if (ipproto < b.ipproto) return true;
   if (ipproto > b.ipproto) return false;
-  
+
   if (lport < b.lport) return true;
   if (lport > b.lport) return false;
-  
+
   if (rport < b.rport) return true;
   if (rport > b.rport) return false;
-  
+
   if (ifindex < b.ifindex) return true;
   if (ifindex > b.ifindex) return false;
-  
+
   if (isV6)
   {
     int d = memcmp(&local.addr6, &b.local.addr6,sizeof(in6_addr));
@@ -452,4 +464,3 @@ bool NTStatStreamKey::operator<(const NTStatStreamKey& b) const
   }
   return false;
 }
-

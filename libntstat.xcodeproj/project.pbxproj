@@ -22,6 +22,7 @@
 		05313D361FD9F7AB006FB69A /* ntstat_kernel_2782.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 05313D341FD9F7AB006FB69A /* ntstat_kernel_2782.cpp */; };
 		05313D371FD9F7AB006FB69A /* ntstat_kernel_2422.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 05313D351FD9F7AB006FB69A /* ntstat_kernel_2422.cpp */; };
 		05313D391FDA051F006FB69A /* NetworkStatisticsClientImpl.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 05313D381FDA051F006FB69A /* NetworkStatisticsClientImpl.cpp */; };
+		05313D3B1FDA0E2E006FB69A /* NTStatKernelStructHandler.hpp in Headers */ = {isa = PBXBuildFile; fileRef = 05313D3A1FDA0E2D006FB69A /* NTStatKernelStructHandler.hpp */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -63,6 +64,7 @@
 		05313D341FD9F7AB006FB69A /* ntstat_kernel_2782.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; name = ntstat_kernel_2782.cpp; path = src/ntstat_kernel_2782.cpp; sourceTree = "<group>"; };
 		05313D351FD9F7AB006FB69A /* ntstat_kernel_2422.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; name = ntstat_kernel_2422.cpp; path = src/ntstat_kernel_2422.cpp; sourceTree = "<group>"; };
 		05313D381FDA051F006FB69A /* NetworkStatisticsClientImpl.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; name = NetworkStatisticsClientImpl.cpp; path = src/NetworkStatisticsClientImpl.cpp; sourceTree = "<group>"; };
+		05313D3A1FDA0E2D006FB69A /* NTStatKernelStructHandler.hpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.h; name = NTStatKernelStructHandler.hpp; path = src/NTStatKernelStructHandler.hpp; sourceTree = "<group>"; };
 		05C21B361FD9A59000DDAC9B /* libntstat.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = libntstat.a; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -103,6 +105,7 @@
 		05C21B2D1FD9A59000DDAC9B = {
 			isa = PBXGroup;
 			children = (
+				05313D3A1FDA0E2D006FB69A /* NTStatKernelStructHandler.hpp */,
 				05313D381FDA051F006FB69A /* NetworkStatisticsClientImpl.cpp */,
 				05313D351FD9F7AB006FB69A /* ntstat_kernel_2422.cpp */,
 				05313D341FD9F7AB006FB69A /* ntstat_kernel_2782.cpp */,
@@ -144,6 +147,7 @@
 				05313D2D1FD9F5A5006FB69A /* ntstat_kernel_2782.h in Headers */,
 				05313D2C1FD9F5A5006FB69A /* ntstat_kernel_3789.h in Headers */,
 				05313D2E1FD9F5A5006FB69A /* ntstat_kernel_2422.h in Headers */,
+				05313D3B1FDA0E2E006FB69A /* NTStatKernelStructHandler.hpp in Headers */,
 				05313D321FD9F5A5006FB69A /* ntstat_kernel_2050.h in Headers */,
 				05313D2F1FD9F5A5006FB69A /* ntstat_kernel_4570.h in Headers */,
 			);

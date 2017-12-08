@@ -1,4 +1,3 @@
-// definitions from bsd/net/ntstat.h kernel header
 // https://github.com/apple/darwin-xnu
 // git checkout xnu-3789.70.16
 // Sierra 10.12
@@ -12,6 +11,22 @@ struct tcp_conn_status {
   unsigned int    conn_probe_failed : 1;
 };
 #define    IFNAMSIZ    16
+
+
+// bsd/net/ntstat.h
+
+enum
+{
+  NSTAT_PROVIDER_NONE  = 0
+  ,NSTAT_PROVIDER_ROUTE  = 1
+  ,NSTAT_PROVIDER_TCP_KERNEL  = 2
+  ,NSTAT_PROVIDER_TCP_USERLAND = 3
+  ,NSTAT_PROVIDER_UDP_KERNEL  = 4
+  ,NSTAT_PROVIDER_UDP_USERLAND = 5
+  ,NSTAT_PROVIDER_IFNET  = 6
+  ,NSTAT_PROVIDER_SYSINFO = 7
+};
+
 
 #pragma pack(push, 4)
 #define __NSTAT_REVISION__      8

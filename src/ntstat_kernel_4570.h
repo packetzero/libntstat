@@ -18,6 +18,8 @@ typedef struct activity_bitmap {
   uint64_t        bitmap[2];      /* 128 bit map, each bit == 8 sec */
 } activity_bitmap_t;
 
+// bsd/net/ntstat.h
+
 #pragma mark -- Common Data Structures --
 
 #define __NSTAT_REVISION__	9
