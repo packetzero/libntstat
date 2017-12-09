@@ -2,7 +2,6 @@
 #define _NT_STAT_KERNEL_STRUCT_HANDLER_H_
 
 #include <stdint.h>
-#include <vector>
 #include "../include/NetworkStatisticsClient.hpp"
 
 // the message header is consistent across versions, so defining here
@@ -24,8 +23,18 @@ typedef struct nstat_msg_hdr
 class MsgDest
 {
 public:
-  virtual void send(nstat_msg_hdr* msg, size_t len, uint64_t context, int num = 1) = 0;
+  /*
+   * Returns current message sequence number.
+   * StructHandlers need to use this value in the hdr.context of each message.
+   */
+  virtual uint64_t seqnum() = 0;
+
+  /*
+   * send message
+   */
+  virtual void send(nstat_msg_hdr* msg, size_t msglen) = 0;
 };
+
 
 /*
  * Abstraction for reading and writing versioned kernel structs.
@@ -37,20 +46,20 @@ class NTStatKernelStructHandler
 public:
 
   /*
-   * write NSTAT_MSG_TYPE_GET_SRC_DESC to vector
+   * write NSTAT_MSG_TYPE_GET_SRC_DESC to dest
    */
-  virtual void writeSrcDesc(std::vector<uint8_t> &dest, uint64_t providerId, uint64_t srcRef ) = 0;
+  virtual void writeSrcDesc(MsgDest &dest, uint64_t providerId, uint64_t srcRef ) = 0;
 
   /*
    * write NSTAT_MSG_TYPE_ADD_ALL_SRCS for TCP or UDP
    */
-  virtual void writeAddAllTcpSrc(std::vector<uint8_t> &dest) = 0;
-  virtual void writeAddAllUdpSrc(std::vector<uint8_t> &dest) = 0;
+  virtual void writeAddAllTcpSrc(MsgDest &dest) = 0;
+  virtual void writeAddAllUdpSrc(MsgDest &dest) = 0;
 
   /*
    * write NSTAT_MSG_TYPE_QUERY_SRC for all
    */
-  virtual void writeQueryAllSrc(std::vector<uint8_t> &dest) = 0;
+  virtual void writeQueryAllSrc(MsgDest &dest) = 0;
 
   /*
    * Extract from msg and populate srcRef and providerId (if in message).
@@ -68,5 +77,13 @@ public:
   virtual void readCounts(nstat_msg_hdr*msg, int structlen, NTStatCounters& dest ) = 0;
 
 };
+
+// macro for consistency in setting hdr fields.  context in particular
+
+#define NTSTAT_MSG_HDR(msg_struct, MsgDestRef, MSG_TYPE)  { \
+  (msg_struct).hdr.type = MSG_TYPE;                         \
+  (msg_struct).hdr.length = sizeof(msg_struct);             \
+  (msg_struct).hdr.context = (MsgDestRef).seqnum();         \
+}
 
 #endif // _NT_STAT_KERNEL_STRUCT_HANDLER_H_

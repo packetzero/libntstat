@@ -29,9 +29,22 @@ class MyNetstatListener : public NetworkStatisticsListener
   {
     log(stream, ' ');
   }
+  virtual void onProcessStatsUpdate(const NTStatStream *process)
+  {
+    log(process, 'P');
+  }
+
 
   void log(const NTStatStream* stream, char displayChar)
   {
+    if (displayChar == 'P')
+    {
+      printf(" P %s pid:%u (%s) bytes (tx/rx):%llu/%llu  packets:%llu/%llu\n",
+             timestr().c_str(), stream->process.pid, stream->process.name,
+             stream->stats.txbytes, stream->stats.rxbytes, stream->stats.txpackets, stream->stats.rxpackets);
+      return;
+    }
+
     if (stream->key.ipproto == IPPROTO_TCP && stream->states.state == TCPS_LISTEN)
     {
       printf(" @ %s pid:%u (%s) LISTEN TCP port:%u\n", timestr().c_str(), stream->process.pid, stream->process.name, ntohs(stream->key.lport));
@@ -40,7 +53,7 @@ class MyNetstatListener : public NetworkStatisticsListener
     {
       printf(" %c %s %s pid:%u (%s)\n", displayChar, timestr().c_str(),
            stream2text(stream->key).c_str(), stream->process.pid, stream->process.name);
-      if (stream->stats.rxpackets > 0 || stream->stats.txpackets > 0)
+      if (displayChar != '+' && (stream->stats.rxpackets > 0 || stream->stats.txpackets > 0))
         printf("   bytes (tx/rx):%llu/%llu  packets:%llu/%llu\n",stream->stats.txbytes, stream->stats.rxbytes, stream->stats.txpackets, stream->stats.rxpackets);
     }
   }

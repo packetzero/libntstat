@@ -23,6 +23,7 @@
 #include <string.h> // memcmp
 #include <string>
 #include <map>
+#include <vector>
 using namespace std;
 
 // pthread macros
@@ -73,26 +74,6 @@ typedef struct nstat_msg_error
   u_int8_t        reserved[4];
 } nstat_msg_error;
 
-// tracking of messages
-/*
-struct MsgContext
-{
-  uint16_t seqnum;
-  uint16_t msgtype;
-  uint16_t loc;
-  uint16_t pad;
-
-  uint64_t to_i() { return *(uint64_t*)this; }
-};
-
-struct QMsg
-{
-  MsgContext       context;
-  vector<uint8_t>  msg;
-
-  QMsg(uint32_t msgtype_, uint64_t ctx_, uint16_t seqnum_, vector<uint8_t> v) : seqnum(seqnum_), contextid(ctx_ & 0x0FFFFFFFFUL), msgtype(msgtype_) { }
-};
-*/
 // Make these true to add more debug logging
 
 static bool _logDbg = false;
@@ -100,6 +81,8 @@ static bool _logTrace = false;
 static bool _logErrors = false;
 
 const int BUFSIZE = 2048;
+static const uint32_t zero_addr6[] = {0,0,0,0};
+
 string msg_name(uint32_t msg_type);
 unsigned int getXnuVersion();
 
@@ -108,25 +91,69 @@ unsigned int getXnuVersion();
  */
 struct NetstatSource
 {
-  NetstatSource(uint64_t srcRef, uint32_t providerId) : _srcRef(srcRef), _providerId(providerId), _haveDesc(false), obj() {}
+  NetstatSource(uint64_t srcRef, uint32_t providerId) : _srcRef(srcRef), _providerId(providerId), _haveDesc(false), obj(), _isProcessRecord(false) {}
 
   uint64_t _srcRef;
   uint32_t _providerId;
   bool     _haveDesc;
   NTStatStream obj;
+  bool     _isProcessRecord;
 };
+
+// tracking of messages
+
+struct QMsg
+{
+  uint64_t         seqnum;
+  vector<uint8_t>  msgbytes;
+  NetstatSource*   ntsrc;
+};
+
 
 /*
  * Implementation of NetworkStatisticsClient
  */
-class NetworkStatisticsClientImpl : public NetworkStatisticsClient
+class NetworkStatisticsClientImpl : public NetworkStatisticsClient, public MsgDest
 {
 public:
-  NetworkStatisticsClientImpl(NetworkStatisticsListener* listener): _listener(listener), _map(), _keepRunning(false), _fd(0), _udpAdded(false), _withCounts(false), _gotCounts(false) //, _seqnum(0), _qmsgMap()
+  NetworkStatisticsClientImpl(NetworkStatisticsListener* listener): _listener(listener), _map(), _keepRunning(false), _fd(0), _udpAdded(false), _withCounts(false), _gotCounts(false), _seqnum(1), _qmsgMap()
   {
     MUINIT(&_mapMutex);
+    INC_QMSG();
   }
 
+  QMsg _workingMsg;
+  void INC_QMSG(NetstatSource* src = 0L)
+  {
+    _workingMsg.seqnum = _seqnum;
+    _workingMsg.msgbytes.clear();
+    _workingMsg.ntsrc = src;
+  }
+
+  // MsgDest::seqnum
+  virtual uint64_t seqnum() { return _seqnum; }
+  
+  // MsgDest::send
+  virtual void send(nstat_msg_hdr* hdr, size_t len)
+  {
+    if (_logTrace) printf("T ENQ type:%s(%d) context:%llu\n", msg_name(hdr->type).c_str(), hdr->type, hdr->context );
+
+    // make copy of message bytes
+
+    _workingMsg.msgbytes.resize(len);
+    memcpy(_workingMsg.msgbytes.data(), hdr, len);
+
+    // enqueue
+
+    _outq.push_back(_workingMsg);
+
+    // advance sequence number for each message
+    
+    _seqnum++;
+
+    INC_QMSG();
+  }
+  
   //------------------------------------------------------------------------
   // returns true on success, false otherwise
   //------------------------------------------------------------------------
@@ -222,12 +249,11 @@ public:
       _structHandler = NewNTStatKernel2422();
 
 
-    vector<uint8_t> vec;
-    _structHandler->writeAddAllTcpSrc(vec);
-    SEND(vec.data(), vec.size());
+    _structHandler->writeAddAllTcpSrc(*this);
 
     while (_keepRunning)
     {
+      sendNextMsg();
       _readNextMessage();
     }
 
@@ -238,7 +264,7 @@ public:
 
 
 private:
-
+  
   //---------------------------------------------------------------
   // write struct to socket fd
   //---------------------------------------------------------------
@@ -256,30 +282,19 @@ private:
     return rc;
   }
 
-  /*
   //---------------------------------------------------------------
   // write message to socket fd
   // returns true if successful
   //---------------------------------------------------------------
   bool SEND(QMsg &qm)
   {
-    nstat_msg_hdr* hdr = (nstat_msg_hdr*)qm.msg.data();
+    nstat_msg_hdr* hdr = (nstat_msg_hdr*)qm.msgbytes.data();
 
     if (_logTrace) printf("T SEND type:%s(%d) context:%llu\n", msg_name(hdr->type).c_str(), hdr->type, hdr->context );
 
-    ssize_t rc = write (_fd, qm.msg.data(), qm.msg.size());
+    ssize_t rc = write (_fd, qm.msgbytes.data(), qm.msgbytes.size());
 
-    return (rc == qm.msg.size());
-  }
-  
-  //----------------------------------------------------------
-  //
-  //----------------------------------------------------------
-  void ENQ(vector<uint8_t> &vec)
-  {
-    nstat_msg_hdr* hdr = (nstat_msg_hdr*)vec.data();
-    QMsg item = QMsg(hdr->type, hdr->context, ++_seqnum, vec);
-    _outq.push_back(item);
+    return (rc == qm.msgbytes.size());
   }
 
   //----------------------------------------------------------
@@ -289,18 +304,26 @@ private:
   {
     if (_outq.empty()) return;
 
+    // get ref to first message in out queue
+    
     QMsg &qm = *_outq.begin();
+    
+    // try to write to KCQ socket
+
     if (SEND(qm))
     {
-      _qmsgMap[qm.context.to_i()] = qm;
+      _qmsgMap[qm.seqnum] = qm;
     }
     else
     {
       // error ... drop on floor
+      printf("E Failed to send\n");
     }
+    
+    // remove it from outq
+
     _outq.erase(_outq.begin());
   }
-*/
   
   //----------------------------------------------------------
   // removeSource
@@ -319,9 +342,9 @@ private:
   }
 
   //----------------------------------------------------------
-  // resetSource
+  // resetSource : allocate and assign to map
   //----------------------------------------------------------
-  void _resetSource(uint64_t srcRef, uint32_t providerId)
+  NetstatSource* _resetSource(uint64_t srcRef, uint32_t providerId)
   {
     _removeSource(srcRef);
 
@@ -332,6 +355,8 @@ private:
     _map[srcRef] = src;
 
     MUUNLOCK(&_mapMutex);
+    
+    return src;
   }
 
   //----------------------------------------------------------
@@ -351,13 +376,17 @@ private:
     MUUNLOCK(&_mapMutex);
     return retval;
   }
+  
 
-  //----------------------------------------------------------
-  // Allocate new NTStreamSource and place in map
-  //----------------------------------------------------------
-  void onSrcAdded(uint32_t providerId, uint64_t srcRef)
+
+  bool is_zero_connection(NTStatStream &ss)
   {
-    _resetSource(srcRef, providerId);
+    if (ss.key.lport != 0 || ss.key.rport != 0) return false;
+    if (ss.key.isV6) {
+      return (bcmp(zero_addr6,&ss.key.local.addr6,16) == 0) && (bcmp(zero_addr6,&ss.key.remote.addr6, 16) == 0);
+    } else {
+      return ss.key.local.addr4.s_addr == 0 && ss.key.remote.addr4.s_addr == 0;
+    }
   }
 
   //----------------------------------------------------------
@@ -381,6 +410,12 @@ private:
 
     if (_logTrace) printf("T RECV type:%s(%d) context:%llu len:%d\n", msg_name(ns->type).c_str(), ns->type, ns->context, num_bytes);
 
+    
+    // TODO : mutex qmsgMap
+    auto fit = _qmsgMap.find(ns->context);
+    QMsg *other = 0L;
+    if (fit != _qmsgMap.end()) other = &fit->second;
+    
     switch (ns->type)
     {
 
@@ -388,11 +423,10 @@ private:
       {
         _structHandler->getSrcRef(ns, num_bytes, srcRef, providerId);
 
-        onSrcAdded(providerId, srcRef);
+        NetstatSource* src = _resetSource(srcRef, providerId);
+        _workingMsg.ntsrc = src;
 
-        vector<uint8_t> vec;
-        _structHandler->writeSrcDesc(vec, providerId, srcRef);
-        SEND(vec.data(), vec.size());
+        _structHandler->writeSrcDesc(*this, providerId, srcRef);
 
         break;
       }
@@ -405,6 +439,8 @@ private:
           _listener->onStreamRemoved(&source->obj);
         }
 
+        _removeSource(srcRef);
+
         break;
       }
       case NSTAT_MSG_TYPE_SRC_DESC:
@@ -416,18 +452,23 @@ private:
         {
           if (_structHandler->readSrcDesc(ns, num_bytes, &source->obj))
           {
-            if (source->obj.key.isV6 == false && source->obj.key.local.addr4.s_addr == 0) {
-              printf("desc for zero address\n");
+            if (is_zero_connection(source->obj))
+            {
+              //printf("process-record\n");
+              source->_isProcessRecord = true;
+              source->_haveDesc = true;
             }
-            // misc cleanups
+            else
+            {
+              // misc cleanups
 
-            if (source->obj.process.pid == 0) strcpy(source->obj.process.name, "kernel_task");
+              if (source->obj.process.pid == 0) strcpy(source->obj.process.name, "kernel_task");
 
-            // notify application
+              // notify application
 
-            source->_haveDesc = true;
-            _listener->onStreamAdded(&source->obj);
-
+              source->_haveDesc = true;
+              _listener->onStreamAdded(&source->obj);
+            }
           } else {
             if (_logDbg) printf("E not TCP or UDP provider:%u\n", providerId);
           }
@@ -442,14 +483,21 @@ private:
         NetstatSource* source = _lookupSource(srcRef);
         if (source != 0L) {
 
-          if (source->obj.key.isV6 == false && source->obj.key.local.addr4.s_addr == 0) {
-            printf("counts for zero address\n");
-          }
-          
           _structHandler->readCounts(ns, num_bytes, source->obj.stats);
+          
           if (source->_haveDesc) {
-            
-            _listener->onStreamStatsUpdate(&source->obj);
+
+            if (source->_isProcessRecord)
+            {
+              if (source->obj.stats.rxpackets > 0 || source->obj.stats.txpackets > 0)
+                _listener->onProcessStatsUpdate(&source->obj);
+            }
+            else
+            {
+              _listener->onStreamStatsUpdate(&source->obj);
+            }
+          } else {
+            printf("count before desc\n");
           }
         }
         break;
@@ -463,18 +511,14 @@ private:
 
           if (!_udpAdded) {
             _udpAdded = true;
-            vector<uint8_t> vec;
-            _structHandler->writeAddAllUdpSrc(vec);
-            SEND(vec.data(), vec.size());
+            _structHandler->writeAddAllUdpSrc(*this);
           } else {
             
             if (_withCounts) {
               if (!_gotCounts)
               {
                 _gotCounts = true;
-                vector<uint8_t> vec;
-                _structHandler->writeQueryAllSrc(vec);
-                SEND(vec.data(), vec.size());
+                _structHandler->writeQueryAllSrc(*this);
               }
             }
           }
@@ -524,13 +568,12 @@ private:
   bool                          _gotCounts;     // have request counts
 
   MUTEX_T                       _mapMutex;
-  /*
+
   vector<QMsg>                  _outq;  // messages that need to be sent
 
   uint16_t                      _seqnum;
   
   map<uint64_t, QMsg>           _qmsgMap; // messages waiting for response
-  */
 
 };
 

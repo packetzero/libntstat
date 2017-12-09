@@ -17,48 +17,54 @@ public:
   //--------------------------------------------------------------------
   // write GET_SRC_DESC message to dest
   //--------------------------------------------------------------------
-  virtual void writeSrcDesc(vector<uint8_t> &dest, uint64_t providerId, uint64_t srcRef )
+  virtual void writeSrcDesc(MsgDest &dest, uint64_t providerId, uint64_t srcRef )
   {
-    dest.resize(sizeof(nstat_msg_get_src_description));
-    nstat_msg_get_src_description &msg = (nstat_msg_get_src_description&)*dest.data();
-
-    msg.hdr.type = NSTAT_MSG_TYPE_GET_SRC_DESC;
-    msg.srcref = (uint32_t)srcRef;
-    msg.hdr.context = CONTEXT_GET_SRC_DESC;
+    nstat_msg_get_src_description msg = nstat_msg_get_src_description();
+    
+    NTSTAT_MSG_HDR(msg, dest, NSTAT_MSG_TYPE_GET_SRC_DESC);
+    
+    msg.srcref = (nstat_provider_id_t)srcRef;
+    
+    dest.send(&msg.hdr, sizeof(msg));
   }
-
-  //--------------------------------------------------------------------
-  // write ADD_ADD_SRCS message to dest
-  //--------------------------------------------------------------------
-  virtual void writeAddAllSrc(vector<uint8_t> &dest, uint32_t providerId) {
-    dest.resize(sizeof(nstat_msg_add_all_srcs));
-    nstat_msg_add_all_srcs &msg = (nstat_msg_add_all_srcs&)*dest.data();
-
-    msg.provider = providerId ;
-    msg.hdr.type = NSTAT_MSG_TYPE_ADD_ALL_SRCS;
-    msg.hdr.context = CONTEXT_ADD_ALL_SRCS;
-
-  }
-
-  virtual void writeAddAllTcpSrc(vector<uint8_t> &dest) {
-    writeAddAllSrc(dest, NSTAT_PROVIDER_TCP);
-  }
-
-  virtual void writeAddAllUdpSrc(vector<uint8_t> &dest) {
-    writeAddAllSrc(dest, NSTAT_PROVIDER_UDP);
-  }
-
+  
   //--------------------------------------------------------------------
   // write QUERY_SRC message to dest
   //--------------------------------------------------------------------
-  virtual void writeQueryAllSrc(std::vector<uint8_t> &dest) {
-    dest.resize(sizeof(nstat_msg_query_src_req));
-    nstat_msg_query_src_req &msg = (nstat_msg_query_src_req&)*dest.data();
+  virtual void writeQueryAllSrc(MsgDest &dest) {
+    nstat_msg_query_src_req msg = nstat_msg_query_src_req();
     
-    msg.hdr.type= NSTAT_MSG_TYPE_QUERY_SRC   ;
+    NTSTAT_MSG_HDR(msg, dest, NSTAT_MSG_TYPE_QUERY_SRC);
+    
     msg.srcref= NSTAT_SRC_REF_ALL;
-    msg.hdr.context = CONTEXT_QUERY_SRC;
+    
+    dest.send(&msg.hdr, sizeof(msg));
   }
+  
+  //--------------------------------------------------------------------
+  // write ADD_ADD_SRCS message to dest
+  //--------------------------------------------------------------------
+  virtual void writeAddAllSrc(MsgDest &dest, uint32_t providerId)
+  {
+    nstat_msg_add_all_srcs msg = nstat_msg_add_all_srcs();
+    
+    NTSTAT_MSG_HDR(msg, dest, NSTAT_MSG_TYPE_ADD_ALL_SRCS);
+    
+    msg.provider = providerId ;
+    
+    dest.send(&msg.hdr, sizeof(msg));
+  }
+  
+  // xnu-3789 is first time we see split _KERNEL and _USERLAND
+  
+  virtual void writeAddAllTcpSrc(MsgDest &dest) {
+    writeAddAllSrc(dest, NSTAT_PROVIDER_TCP);
+  }
+  
+  virtual void writeAddAllUdpSrc(MsgDest &dest) {
+    writeAddAllSrc(dest, NSTAT_PROVIDER_UDP);
+  }
+
 
   //--------------------------------------------------------------------
   // extract srcRef, providerId (if possible) from message
