@@ -1,10 +1,10 @@
-//
 //  NetworkStatisticsClient.cpp
-//  netstat-socket
 //
-//  Created by Alex Malone on 12/6/17.
-//  Copyright © 2017 Ziften. All rights reserved.
-//
+//  Copyright © 2017 Alex Malone. All rights reserved.
+
+// TODO: mutex around outq, sentmap
+// TODO: cleanup sentmap
+// TODO: periodically ask for counts on active connections (configurable duration)
 
 #include "NTStatKernelStructHandler.hpp"
 
@@ -46,6 +46,9 @@ NTStatKernelStructHandler* NewNTStatKernel4570();
 
 #define      NET_STAT_CONTROL_NAME   "com.apple.network.statistics"
 
+#define REMOVED_SOURCE_KEEP_SECONDS 30
+#define CLEANUP_SOURCE_LIST_SECONDS 60
+
 enum
 {
   // generic response messages
@@ -78,7 +81,7 @@ typedef struct nstat_msg_error
 
 static bool _logDbg = false;
 static bool _logTrace = false;
-static bool _logErrors = false;
+static bool _logErrors = true;
 
 const int BUFSIZE = 2048;
 static const uint32_t zero_addr6[] = {0,0,0,0};
@@ -91,13 +94,19 @@ unsigned int getXnuVersion();
  */
 struct NetstatSource
 {
-  NetstatSource(uint64_t srcRef, uint32_t providerId) : _srcRef(srcRef), _providerId(providerId), _haveDesc(false), obj(), _isProcessRecord(false) {}
+  NetstatSource(uint64_t srcRef, uint32_t providerId) : _srcRef(srcRef), _providerId(providerId), obj(),
+   _haveDesc(false), _haveNotifiedAdded(false), _isProcessRecord(false), _tsAdded(0L), _tsRemoved(0L) {}
 
   uint64_t _srcRef;
   uint32_t _providerId;
-  bool     _haveDesc;
   NTStatStream obj;
+
+  bool     _haveDesc;
+  bool     _haveNotifiedAdded;
   bool     _isProcessRecord;
+
+  time_t   _tsAdded;
+  time_t   _tsRemoved;
 };
 
 // tracking of messages
@@ -251,10 +260,18 @@ public:
 
     _structHandler->writeAddAllTcpSrc(*this);
 
+    time_t tLastCleanup = time(NULL);
+
     while (_keepRunning)
     {
+      if ((time(NULL) - tLastCleanup) > CLEANUP_SOURCE_LIST_SECONDS) {
+        _removeOldSources();
+      }
+
       sendNextMsg();
-      _readNextMessage();
+      while (haveIncomingMessage()) {
+        _readNextMessage();
+      }
     }
 
     close(_fd);
@@ -302,32 +319,49 @@ private:
   //----------------------------------------------------------
   void sendNextMsg()
   {
-    if (_outq.empty()) return;
-
-    // get ref to first message in out queue
-    
-    QMsg &qm = *_outq.begin();
-    
-    // try to write to KCQ socket
-
-    if (SEND(qm))
+    while (!_outq.empty())
     {
-      _qmsgMap[qm.seqnum] = qm;
-    }
-    else
-    {
-      // error ... drop on floor
-      printf("E Failed to send\n");
+      // get ref to first message in outq
+    
+      QMsg &qm = *_outq.begin();
+
+      nstat_msg_hdr* hdr = (nstat_msg_hdr*)qm.msgbytes.data();
+      
+      // avoid sending requests for things we already have
+      
+      if (hdr->type == NSTAT_MSG_TYPE_GET_SRC_DESC)
+      {
+        if (0L != qm.ntsrc && qm.ntsrc->_haveDesc) {
+          // don't need to send this.  Any reason to request again?
+          _outq.erase(_outq.begin());
+          continue;
+        }
+      }
+
+      // try to write to KCQ socket
+
+      if (SEND(qm))
+      {
+        _qmsgMap[qm.seqnum] = qm;
+      }
+      else
+      {
+        // error ... drop on floor
+        if (_logErrors) printf("E Failed to send\n");
+      }
+
+      // pop off message sent
+      _outq.erase(_outq.begin());
+
+      break;
     }
     
-    // remove it from outq
-
-    _outq.erase(_outq.begin());
   }
   
   //----------------------------------------------------------
   // removeSource
   //----------------------------------------------------------
+  /*
   void _removeSource(uint64_t srcRef)
   {
     MULOCK(&_mapMutex);
@@ -340,19 +374,94 @@ private:
     
     MUUNLOCK(&_mapMutex);
   }
+   */
 
+  //----------------------------------------------------------
+  // markSourceForRemove
+  //----------------------------------------------------------
+  void _markSourceForRemove(uint64_t srcRef)
+  {
+    MULOCK(&_mapMutex);
+    
+    auto fit = _map.find(srcRef);
+    if (fit != _map.end()) {
+      fit->second->_tsRemoved = time(NULL);
+    }
+    
+    MUUNLOCK(&_mapMutex);
+  }
+  
+  void _markSourceForRemove(NetstatSource *source)
+  {
+    source->_tsRemoved = time(NULL);
+  }
+
+  //----------------------------------------------------------
+  // removeOldSources
+  //----------------------------------------------------------
+  void _removeOldSources()
+  {
+    time_t now = time(NULL);
+
+    MULOCK(&_mapMutex);
+
+    auto it = _map.begin();
+    while (it != _map.end())
+    {
+      if (it->second->_tsRemoved > 0)
+      {
+        time_t delta = now - it->second->_tsRemoved;
+        if (delta > REMOVED_SOURCE_KEEP_SECONDS) {
+          _map.erase(it++);
+          continue;
+        }
+      }
+      it++;
+    }
+    
+    MUUNLOCK(&_mapMutex);
+  }
+
+  //----------------------------------------------------------
+  // check KCQ socket to see if bytes ready for reading.
+  //----------------------------------------------------------
+  bool haveIncomingMessage()
+  {
+    fd_set  fds;
+    struct timeval to;
+    to.tv_sec = 0;
+    to.tv_usec = 50000;
+    FD_ZERO (&fds);
+    FD_SET (_fd, &fds);
+    
+    // select on socket, rather than read..
+    return (select(_fd +1, &fds, NULL, NULL, &to) > 0);
+  }
+  
   //----------------------------------------------------------
   // resetSource : allocate and assign to map
   //----------------------------------------------------------
   NetstatSource* _resetSource(uint64_t srcRef, uint32_t providerId)
   {
-    _removeSource(srcRef);
-
-    NetstatSource* src = new NetstatSource(srcRef, providerId);
-
     MULOCK(&_mapMutex);
 
-    _map[srcRef] = src;
+    NetstatSource* src = 0L;
+    auto fit = _map.find(srcRef);
+    if (fit != _map.end()) {
+      // already have it
+      if (fit->second->_tsRemoved > 0) {
+        _map.erase(fit++);
+      } else {
+        if (_logErrors) printf("add for existing src\n");
+        src = fit->second;
+      }
+    }
+
+    if (0L == src) {
+      src = new NetstatSource(srcRef, providerId);
+      src->_tsAdded = time(NULL);
+      _map[srcRef] = src;
+    }
 
     MUUNLOCK(&_mapMutex);
     
@@ -421,12 +530,15 @@ private:
 
       case NSTAT_MSG_TYPE_SRC_ADDED:
       {
+        // it's possible to get SRC_ADDED for one that you already have.
+        // SRC_ADDED are typically sent (resent) right before the SRC_REMOVED
+
         _structHandler->getSrcRef(ns, num_bytes, srcRef, providerId);
 
         NetstatSource* src = _resetSource(srcRef, providerId);
-        _workingMsg.ntsrc = src;
 
-        _structHandler->writeSrcDesc(*this, providerId, srcRef);
+        if (!src->_haveDesc)
+          enqueueRequestForSrcDesc(src);
 
         break;
       }
@@ -434,12 +546,10 @@ private:
       {
         _structHandler->getSrcRef(ns, num_bytes, srcRef, providerId);
         NetstatSource* source = _lookupSource(srcRef);
+        _markSourceForRemove(source);
 
-        if (source != 0L) {
+        if (source != 0L)
           _listener->onStreamRemoved(&source->obj);
-        }
-
-        _removeSource(srcRef);
 
         break;
       }
@@ -460,18 +570,24 @@ private:
             }
             else
             {
+              source->_haveDesc = true;
+
               // misc cleanups
 
               if (source->obj.process.pid == 0) strcpy(source->obj.process.name, "kernel_task");
 
-              // notify application
+              // notify application (it not already done)
 
-              source->_haveDesc = true;
-              _listener->onStreamAdded(&source->obj);
+              if (!source->_haveNotifiedAdded)
+                _listener->onStreamAdded(&source->obj);
+
+              source->_haveNotifiedAdded = true;
             }
           } else {
             if (_logDbg) printf("E not TCP or UDP provider:%u\n", providerId);
           }
+        } else {
+          if (_logErrors) printf("desc before src defined\n");
         }
 
         break;
@@ -497,8 +613,13 @@ private:
               _listener->onStreamStatsUpdate(&source->obj);
             }
           } else {
-            printf("count before desc\n");
+            // It appears that for active connections, you get counts() before description
+            // ask for it now.
+            enqueueRequestForSrcDesc(source);
+            //if (_logErrors) printf("count before desc\n");
           }
+        } else {
+          if (_logErrors) printf("counts before src defined\n");
         }
         break;
       }
@@ -518,7 +639,7 @@ private:
               if (!_gotCounts)
               {
                 _gotCounts = true;
-                _structHandler->writeQueryAllSrc(*this);
+                //_structHandler->writeQueryAllSrc(*this);
               }
             }
           }
@@ -533,13 +654,25 @@ private:
       {
         // Error message
         nstat_msg_error* perr = (nstat_msg_error*)c;
-        if (true) printf("T error code:%d (0x%x) \n", perr->error, perr->error);
+        if (_logErrors) {
+          printf("T error code:%d (0x%x) \n", perr->error, perr->error);
+          if (other != 0L) {
+            uint64_t requestSrcRef=123456;
+            int requestMsgType = -1;
+            nstat_msg_hdr* requestHdr = (nstat_msg_hdr*)other->msgbytes.data();
+            if (requestHdr != 0L) {
+              requestMsgType = requestHdr->type;
+            }
+            if (other->ntsrc != 0L) requestSrcRef = other->ntsrc->_srcRef;
+            printf("  for REQUEST seq:%llu srcRef:%llu msgtype:%s (%d)\n", other->seqnum, requestSrcRef, msg_name(requestMsgType).c_str(), requestMsgType);
+          }
+        }
       }
         return 0;//-1;
         break;
 
       default:
-        printf("E unknown message type:%d\n", ns->type);
+        if (_logErrors) printf("E unknown message type:%d\n", ns->type);
         return -1;
 
     }
@@ -547,6 +680,22 @@ private:
     return 0;
   }
 
+  void enqueueRequestForSrcDesc(NetstatSource* source)
+  {
+    // first check to make sure we don't already have a request in flight
+
+    for (auto it = _outq.begin(); it != _outq.end(); it++) {
+      NetstatSource *tmp = it->ntsrc;
+      nstat_msg_hdr *msghdr = (nstat_msg_hdr*)it->msgbytes.data();
+      if (0L != tmp && msghdr->type == NSTAT_MSG_TYPE_GET_SRC_DESC && tmp->_srcRef == source->_srcRef) return;
+    }
+    
+    // don't have any matching outstanding requests, so send it
+    
+    _workingMsg.ntsrc = source;
+    _structHandler->writeSrcDesc(*this, source->_providerId, source->_srcRef);
+  }
+  
   virtual void stop() { _keepRunning = false; }
 
   // private data members
