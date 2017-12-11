@@ -24,8 +24,6 @@ public:
   virtual void onStreamRemoved(const NTStatStream *stream)=0;
   
   virtual void onStreamStatsUpdate(const NTStatStream *stream)=0;
-
-  virtual void onProcessStatsUpdate(const NTStatStream *process)=0;
 };
 
 /*

@@ -4,7 +4,7 @@
 
 // TODO: mutex around outq, sentmap
 // TODO: cleanup sentmap
-// TODO: periodically ask for counts on active connections (configurable duration)
+// TODO: periodically ask for counts on active connections (configurable duration, including OFF)
 
 #include "NTStatKernelStructHandler.hpp"
 
@@ -95,7 +95,7 @@ unsigned int getXnuVersion();
 struct NetstatSource
 {
   NetstatSource(uint64_t srcRef, uint32_t providerId) : _srcRef(srcRef), _providerId(providerId), obj(),
-   _haveDesc(false), _haveNotifiedAdded(false), _isProcessRecord(false), _tsAdded(0L), _tsRemoved(0L) {}
+   _haveDesc(false), _haveNotifiedAdded(false), _tsAdded(0L), _tsRemoved(0L) {}
 
   uint64_t _srcRef;
   uint32_t _providerId;
@@ -103,7 +103,6 @@ struct NetstatSource
 
   bool     _haveDesc;
   bool     _haveNotifiedAdded;
-  bool     _isProcessRecord;
 
   time_t   _tsAdded;
   time_t   _tsRemoved;
@@ -562,14 +561,6 @@ private:
         {
           if (_structHandler->readSrcDesc(ns, num_bytes, &source->obj))
           {
-            if (is_zero_connection(source->obj))
-            {
-              //printf("process-record\n");
-              source->_isProcessRecord = true;
-              source->_haveDesc = true;
-            }
-            else
-            {
               source->_haveDesc = true;
 
               // misc cleanups
@@ -582,7 +573,6 @@ private:
                 _listener->onStreamAdded(&source->obj);
 
               source->_haveNotifiedAdded = true;
-            }
           } else {
             if (_logDbg) printf("E not TCP or UDP provider:%u\n", providerId);
           }
@@ -603,15 +593,8 @@ private:
           
           if (source->_haveDesc) {
 
-            if (source->_isProcessRecord)
-            {
-              if (source->obj.stats.rxpackets > 0 || source->obj.stats.txpackets > 0)
-                _listener->onProcessStatsUpdate(&source->obj);
-            }
-            else
-            {
-              _listener->onStreamStatsUpdate(&source->obj);
-            }
+            _listener->onStreamStatsUpdate(&source->obj);
+            
           } else {
             // It appears that for active connections, you get counts() before description
             // ask for it now.
