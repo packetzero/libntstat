@@ -2,7 +2,14 @@
 //
 //  Copyright © 2017 Alex Malone. All rights reserved.
 
-// TODO: mutex around outq, sentmap
+// typical order of message received for a stream:
+//
+// T RECV <    0 type:SRC_ADDED(10001) len:28 srcRef:20
+// ..
+// T RECV <    0 type:SRC_COUNTS(10004) len:144 srcRef:20
+// T RECV <    0 type:SRC_DESC(10003) len:296 srcRef:20
+// T RECV <    0 type:SRC_REMOVED(10002) len:24 srcRef:20
+
 // TODO: cleanup sentmap
 // TODO: periodically ask for counts on active connections (configurable duration, including OFF)
 
@@ -82,11 +89,13 @@ typedef struct nstat_msg_error
 static bool _logDbg = false;
 static bool _logTrace = false;
 static bool _logErrors = true;
+static bool _logSendReceive = false;
 
 const int BUFSIZE = 2048;
 static const uint32_t zero_addr6[] = {0,0,0,0};
 
 string msg_name(uint32_t msg_type);
+char msg_dir(uint32_t msg_type);
 unsigned int getXnuVersion();
 
 /*
@@ -126,7 +135,6 @@ class NetworkStatisticsClientImpl : public NetworkStatisticsClient, public MsgDe
 public:
   NetworkStatisticsClientImpl(NetworkStatisticsListener* listener): _listener(listener), _map(), _keepRunning(false), _fd(0), _udpAdded(false), _withCounts(false), _gotCounts(false), _seqnum(1), _qmsgMap()
   {
-    MUINIT(&_mapMutex);
     INC_QMSG();
   }
 
@@ -142,9 +150,10 @@ public:
   virtual uint64_t seqnum() { return _seqnum; }
   
   // MsgDest::send
+  // The message gets enqueued, and later sent in sendNextMessage()
   virtual void send(nstat_msg_hdr* hdr, size_t len)
   {
-    if (_logTrace) printf("T ENQ type:%s(%d) context:%llu\n", msg_name(hdr->type).c_str(), hdr->type, hdr->context );
+    if (_logTrace) printf("T ENQ %s\n", _sprintMsg(hdr).c_str() );
 
     // make copy of message bytes
 
@@ -153,6 +162,7 @@ public:
 
     // enqueue
 
+    _workingMsg.seqnum = hdr->context;
     _outq.push_back(_workingMsg);
 
     // advance sequence number for each message
@@ -268,6 +278,7 @@ public:
       }
 
       sendNextMsg();
+
       while (haveIncomingMessage()) {
         _readNextMessage();
       }
@@ -280,7 +291,7 @@ public:
 
 
 private:
-  
+  /*
   //---------------------------------------------------------------
   // write struct to socket fd
   //---------------------------------------------------------------
@@ -296,7 +307,7 @@ private:
     if (_logErrors && rc < structlen) printf("E ERROR on SEND write returned %d expecting %d\n", (int)rc, (int)structlen);
 
     return rc;
-  }
+  }*/
 
   //---------------------------------------------------------------
   // write message to socket fd
@@ -306,7 +317,7 @@ private:
   {
     nstat_msg_hdr* hdr = (nstat_msg_hdr*)qm.msgbytes.data();
 
-    if (_logTrace) printf("T SEND type:%s(%d) context:%llu\n", msg_name(hdr->type).c_str(), hdr->type, hdr->context );
+    if (_logSendReceive) printf("T SEND %s\n", _sprintMsg(hdr).c_str());
 
     ssize_t rc = write (_fd, qm.msgbytes.data(), qm.msgbytes.size());
 
@@ -358,36 +369,14 @@ private:
   }
   
   //----------------------------------------------------------
-  // removeSource
-  //----------------------------------------------------------
-  /*
-  void _removeSource(uint64_t srcRef)
-  {
-    MULOCK(&_mapMutex);
-
-    auto fit = _map.find(srcRef);
-    if (fit != _map.end()) {
-      _map.erase(fit);
-      delete fit->second;
-    }
-    
-    MUUNLOCK(&_mapMutex);
-  }
-   */
-
-  //----------------------------------------------------------
   // markSourceForRemove
   //----------------------------------------------------------
   void _markSourceForRemove(uint64_t srcRef)
   {
-    MULOCK(&_mapMutex);
-    
     auto fit = _map.find(srcRef);
     if (fit != _map.end()) {
       fit->second->_tsRemoved = time(NULL);
     }
-    
-    MUUNLOCK(&_mapMutex);
   }
   
   void _markSourceForRemove(NetstatSource *source)
@@ -402,8 +391,6 @@ private:
   {
     time_t now = time(NULL);
 
-    MULOCK(&_mapMutex);
-
     auto it = _map.begin();
     while (it != _map.end())
     {
@@ -417,8 +404,6 @@ private:
       }
       it++;
     }
-    
-    MUUNLOCK(&_mapMutex);
   }
 
   //----------------------------------------------------------
@@ -442,8 +427,6 @@ private:
   //----------------------------------------------------------
   NetstatSource* _resetSource(uint64_t srcRef, uint32_t providerId)
   {
-    MULOCK(&_mapMutex);
-
     NetstatSource* src = 0L;
     auto fit = _map.find(srcRef);
     if (fit != _map.end()) {
@@ -462,8 +445,6 @@ private:
       _map[srcRef] = src;
     }
 
-    MUUNLOCK(&_mapMutex);
-    
     return src;
   }
 
@@ -474,29 +455,28 @@ private:
   {
     NetstatSource* retval = 0L;
 
-    MULOCK(&_mapMutex);
-
     auto fit = _map.find(srcRef);
     if (fit != _map.end()) {
       retval = fit->second;
     }
 
-    MUUNLOCK(&_mapMutex);
     return retval;
   }
   
-
-
-  bool is_zero_connection(NTStatStream &ss)
+  //----------------------------------------------------------
+  // return message detail string for consistent logging
+  //----------------------------------------------------------
+  std::string _sprintMsg(nstat_msg_hdr* hdr, uint64_t srcRef = 0L)
   {
-    if (ss.key.lport != 0 || ss.key.rport != 0) return false;
-    if (ss.key.isV6) {
-      return (bcmp(zero_addr6,&ss.key.local.addr6,16) == 0) && (bcmp(zero_addr6,&ss.key.remote.addr6, 16) == 0);
-    } else {
-      return ss.key.local.addr4.s_addr == 0 && ss.key.remote.addr4.s_addr == 0;
-    }
-  }
+    char tmp[256];
+    
+    if (hdr == 0L) return "NULL";
 
+    sprintf(tmp, "%c %4llu type:%s(%d) len:%d srcRef:%llu", msg_dir(hdr->type), hdr->context, msg_name(hdr->type).c_str(), hdr->type, hdr->length, srcRef);
+
+    return string(tmp);
+  }
+  
   //----------------------------------------------------------
   // _readNextMessage()
   // The KCQ socket is really a queue.  This reads the next
@@ -515,11 +495,13 @@ private:
     if (num_bytes <= 0) return -1;
 
     nstat_msg_hdr *ns = (nstat_msg_hdr *) c;
+    _structHandler->getSrcRef(ns, num_bytes, srcRef, providerId);
 
-    if (_logTrace) printf("T RECV type:%s(%d) context:%llu len:%d\n", msg_name(ns->type).c_str(), ns->type, ns->context, num_bytes);
+    if (_logSendReceive) printf("T RECV %s\n", _sprintMsg(ns, srcRef).c_str());
 
-    
-    // TODO : mutex qmsgMap
+    // get corresponding request message (if possible)
+    // SRC_ADDED, SRC_REMOVED, SRC_DESC, SRC_COUNTS, etc. all have context == 0
+
     auto fit = _qmsgMap.find(ns->context);
     QMsg *other = 0L;
     if (fit != _qmsgMap.end()) other = &fit->second;
@@ -532,8 +514,6 @@ private:
         // it's possible to get SRC_ADDED for one that you already have.
         // SRC_ADDED are typically sent (resent) right before the SRC_REMOVED
 
-        _structHandler->getSrcRef(ns, num_bytes, srcRef, providerId);
-
         NetstatSource* src = _resetSource(srcRef, providerId);
 
         if (!src->_haveDesc)
@@ -543,7 +523,6 @@ private:
       }
       case NSTAT_MSG_TYPE_SRC_REMOVED:
       {
-        _structHandler->getSrcRef(ns, num_bytes, srcRef, providerId);
         NetstatSource* source = _lookupSource(srcRef);
         _markSourceForRemove(source);
 
@@ -554,7 +533,6 @@ private:
       }
       case NSTAT_MSG_TYPE_SRC_DESC:
       {
-        _structHandler->getSrcRef(ns, num_bytes, srcRef, providerId);
         NetstatSource* source = _lookupSource(srcRef);
 
         if (source != 0L)
@@ -584,8 +562,6 @@ private:
       }
       case NSTAT_MSG_TYPE_SRC_COUNTS:
       {
-        _structHandler->getSrcRef(ns, num_bytes, srcRef, providerId);
-
         NetstatSource* source = _lookupSource(srcRef);
         if (source != 0L) {
 
@@ -640,14 +616,8 @@ private:
         if (_logErrors) {
           printf("T error code:%d (0x%x) \n", perr->error, perr->error);
           if (other != 0L) {
-            uint64_t requestSrcRef=123456;
-            int requestMsgType = -1;
-            nstat_msg_hdr* requestHdr = (nstat_msg_hdr*)other->msgbytes.data();
-            if (requestHdr != 0L) {
-              requestMsgType = requestHdr->type;
-            }
-            if (other->ntsrc != 0L) requestSrcRef = other->ntsrc->_srcRef;
-            printf("  for REQUEST seq:%llu srcRef:%llu msgtype:%s (%d)\n", other->seqnum, requestSrcRef, msg_name(requestMsgType).c_str(), requestMsgType);
+            uint64_t requestSrcRef = (other->ntsrc != 0L) ?  other->ntsrc->_srcRef : 0L;
+            printf("  for REQUEST (%s) srcRef:%llu\n", _sprintMsg((nstat_msg_hdr*)other->msgbytes.data()).c_str(), requestSrcRef);
           }
         }
       }
@@ -698,8 +668,6 @@ private:
   bool                          _withCounts;    // application wants stat counters
   
   bool                          _gotCounts;     // have request counts
-
-  MUTEX_T                       _mapMutex;
 
   vector<QMsg>                  _outq;  // messages that need to be sent
 
@@ -768,6 +736,31 @@ string msg_name(uint32_t msg_type)
       break;
   }
   return "?";
+}
+
+//----------------------------------------------------------
+// '>' for request '<' for response
+//----------------------------------------------------------
+char msg_dir(uint32_t msg_type)
+{
+  switch(msg_type) {
+    case NSTAT_MSG_TYPE_ADD_SRC:
+    case NSTAT_MSG_TYPE_ADD_ALL_SRCS:
+    case NSTAT_MSG_TYPE_REM_SRC:
+    case NSTAT_MSG_TYPE_QUERY_SRC:
+    case NSTAT_MSG_TYPE_GET_SRC_DESC:
+      return '>';
+      
+    case NSTAT_MSG_TYPE_ERROR:
+    case NSTAT_MSG_TYPE_SUCCESS:
+    case NSTAT_MSG_TYPE_SRC_ADDED:
+    case NSTAT_MSG_TYPE_SRC_REMOVED:
+    case NSTAT_MSG_TYPE_SRC_DESC:
+    case NSTAT_MSG_TYPE_SRC_COUNTS:
+    default:
+      break;
+  }
+  return '<';
 }
 
 //----------------------------------------------------------
