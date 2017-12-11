@@ -14,12 +14,6 @@ typedef struct nstat_msg_hdr
         uint16_t       flags;
 } nstat_msg_hdr;
 
-// contexts shared between NetworkStatisticsClient implementation and struct handlers
-
-#define CONTEXT_QUERY_SRC    9995
-#define CONTEXT_ADD_ALL_SRCS 9996
-#define CONTEXT_GET_SRC_DESC 9997
-
 class MsgDest
 {
 public:

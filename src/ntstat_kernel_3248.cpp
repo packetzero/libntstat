@@ -87,7 +87,7 @@ public:
         srcRef = ((nstat_msg_src_removed*)msg)->srcref;
         break;
       default:
-        printf("E getSrcRef not implemented for type %d\n", msg->type);
+        //printf("E getSrcRef not implemented for type %d\n", msg->type);
         break;
     }
   }
@@ -182,7 +182,16 @@ public:
     dest.txbytes = msg->counts.nstat_txbytes;
     dest.rxpackets = msg->counts.nstat_rxpackets;
     dest.txpackets = msg->counts.nstat_txpackets;
-  }
+
+    dest.cell_rxbytes = msg->counts.nstat_cell_rxbytes;
+    dest.cell_txbytes = msg->counts.nstat_cell_txbytes;
+    
+    dest.wifi_rxbytes = msg->counts.nstat_wifi_rxbytes;
+    dest.wifi_txbytes = msg->counts.nstat_wifi_txbytes;
+    
+    dest.wired_rxbytes = msg->counts.nstat_wired_rxbytes;
+    dest.wired_txbytes = msg->counts.nstat_wired_txbytes;
+}
 
 };
 

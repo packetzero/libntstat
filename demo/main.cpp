@@ -11,6 +11,7 @@ using namespace std;
 
 string stream2text (const NTStatStreamKey& s);
 string timestr();
+std::string stateToText(const NTStatStream *stream);
 
 /*
  * Implementing this listener allows receipt of events.
@@ -27,34 +28,34 @@ class MyNetstatListener : public NetworkStatisticsListener
   }
   virtual void onStreamStatsUpdate(const NTStatStream *stream)
   {
-    log(stream, ' ');
-  }
-  virtual void onProcessStatsUpdate(const NTStatStream *process)
-  {
-    log(process, 'P');
+    log(stream, '#');
   }
 
 
   void log(const NTStatStream* stream, char displayChar)
   {
-    if (displayChar == 'P')
-    {
-      printf(" P %s pid:%u (%s) bytes (tx/rx):%llu/%llu  packets:%llu/%llu\n",
-             timestr().c_str(), stream->process.pid, stream->process.name,
-             stream->stats.txbytes, stream->stats.rxbytes, stream->stats.txpackets, stream->stats.rxpackets);
-      return;
-    }
-
     if (stream->key.ipproto == IPPROTO_TCP && stream->states.state == TCPS_LISTEN)
     {
       printf(" @ %s pid:%u (%s) LISTEN TCP port:%u\n", timestr().c_str(), stream->process.pid, stream->process.name, ntohs(stream->key.lport));
     }
     else
     {
-      printf(" %c %s %s pid:%u (%s)\n", displayChar, timestr().c_str(),
-           stream2text(stream->key).c_str(), stream->process.pid, stream->process.name);
+      //string stateStr = (displayChar == '-' ? stateToText(stream) : "");
+      string notes = "";
+      if (displayChar == '-' && stream->key.ipproto == IPPROTO_TCP &&
+          stream->stats.rxpackets == 0) notes = "FAILED";
+      
+      printf(" %c %s %s pid:%u (%s) %s\n", displayChar, timestr().c_str(),
+           stream2text(stream->key).c_str(), stream->process.pid, stream->process.name, notes.c_str());
+
+      // write bytes if present on update/remove
+
+      string medium = "wired";
+      if (stream->stats.cell_txbytes > 0) medium = "cell";
+      if (stream->stats.wifi_txbytes > 0) medium = "wifi";
+
       if (displayChar != '+' && (stream->stats.rxpackets > 0 || stream->stats.txpackets > 0))
-        printf("   bytes (tx/rx):%llu/%llu  packets:%llu/%llu\n",stream->stats.txbytes, stream->stats.rxbytes, stream->stats.txpackets, stream->stats.rxpackets);
+        printf("   bytes (tx/rx):%llu/%llu  packets:%llu/%llu %s\n",stream->stats.txbytes, stream->stats.rxbytes, stream->stats.txpackets, stream->stats.rxpackets, medium.c_str());
     }
   }
   
@@ -123,6 +124,27 @@ string stream2text (const NTStatStreamKey& s)
 }
   return val;
 }
+
+std::string stateToText(const NTStatStream *stream)
+{
+  switch(stream->states.state)
+  {
+    case TCPS_CLOSED: return ("CLOSED");
+    case TCPS_LISTEN: return ("LISTENING");
+    case TCPS_ESTABLISHED: return ("ESTABLISHED");
+    case TCPS_CLOSING: return ("CLOSING");
+    case TCPS_SYN_SENT: return ("SYN_SENT");
+    case TCPS_LAST_ACK: return ("LAST_ACK");
+    case TCPS_CLOSE_WAIT: return ("CLOSE_WAIT");
+    case TCPS_TIME_WAIT: return ("TIME_WAIT");
+    case TCPS_FIN_WAIT_1 : return ("FIN_WAIT_1");
+    case TCPS_FIN_WAIT_2 : return ("FIN_WAIT_2");
+      
+    default:
+      return("?");
+  }
+  
+} // stateToText
 
 #include <time.h>
 string timestr()

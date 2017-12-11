@@ -10,8 +10,6 @@
 // T RECV <    0 type:SRC_DESC(10003) len:296 srcRef:20
 // T RECV <    0 type:SRC_REMOVED(10002) len:24 srcRef:20
 
-// TODO: cleanup sentmap
-// TODO: periodically ask for counts on active connections (configurable duration, including OFF)
 
 #include "NTStatKernelStructHandler.hpp"
 
@@ -88,11 +86,10 @@ typedef struct nstat_msg_error
 
 static bool _logDbg = false;
 static bool _logTrace = false;
-static bool _logErrors = true;
+static bool _logErrors = false;
 static bool _logSendReceive = false;
 
 const int BUFSIZE = 2048;
-static const uint32_t zero_addr6[] = {0,0,0,0};
 
 string msg_name(uint32_t msg_type);
 char msg_dir(uint32_t msg_type);
@@ -291,23 +288,6 @@ public:
 
 
 private:
-  /*
-  //---------------------------------------------------------------
-  // write struct to socket fd
-  //---------------------------------------------------------------
-  ssize_t SEND(void *pstruct, size_t structlen)
-  {
-    nstat_msg_hdr* hdr = (nstat_msg_hdr*)pstruct;
-
-    
-    if (_logTrace) printf("T SEND type:%s(%d) context:%llu\n", msg_name(hdr->type).c_str(), hdr->type, hdr->context );
-
-    ssize_t rc = write (_fd, pstruct, structlen);
-
-    if (_logErrors && rc < structlen) printf("E ERROR on SEND write returned %d expecting %d\n", (int)rc, (int)structlen);
-
-    return rc;
-  }*/
 
   //---------------------------------------------------------------
   // write message to socket fd
@@ -325,7 +305,9 @@ private:
   }
 
   //----------------------------------------------------------
-  //
+  // Take first QMsg from outq and send on socket
+  // Adds QMsg to qmsgMap so we can look it up when the corresponding
+  // ERROR/SUCCESS response arrives
   //----------------------------------------------------------
   void sendNextMsg()
   {
@@ -414,7 +396,7 @@ private:
     fd_set  fds;
     struct timeval to;
     to.tv_sec = 0;
-    to.tv_usec = 50000;
+    to.tv_usec = 100000;
     FD_ZERO (&fds);
     FD_SET (_fd, &fds);
     
@@ -503,8 +485,11 @@ private:
     // SRC_ADDED, SRC_REMOVED, SRC_DESC, SRC_COUNTS, etc. all have context == 0
 
     auto fit = _qmsgMap.find(ns->context);
-    QMsg *other = 0L;
-    if (fit != _qmsgMap.end()) other = &fit->second;
+    QMsg reqMsg;
+    if (fit != _qmsgMap.end()) {
+      reqMsg = fit->second;
+      _qmsgMap.erase(fit);
+    }
     
     switch (ns->type)
     {
@@ -569,7 +554,8 @@ private:
           
           if (source->_haveDesc) {
 
-            _listener->onStreamStatsUpdate(&source->obj);
+            // TODO: only send updates if asking for it on interval.  most counts are sent right before REMOVE
+            //_listener->onStreamStatsUpdate(&source->obj);
             
           } else {
             // It appears that for active connections, you get counts() before description
@@ -583,26 +569,19 @@ private:
         break;
       }
       case NSTAT_MSG_TYPE_SUCCESS:
-        if (ns->context == CONTEXT_QUERY_SRC) {
-          // ?
-        } else if (ns->context == CONTEXT_ADD_ALL_SRCS) {
+        if (reqMsg.msgbytes.size() > 0)
+        {
+          nstat_msg_hdr* reqHdr = (nstat_msg_hdr*)reqMsg.msgbytes.data();
+          if (reqHdr->type == NSTAT_MSG_TYPE_ADD_ALL_SRCS)
+          {
+            // now add UDP
 
-          // now add UDP
-
-          if (!_udpAdded) {
-            _udpAdded = true;
-            _structHandler->writeAddAllUdpSrc(*this);
-          } else {
-            
-            if (_withCounts) {
-              if (!_gotCounts)
-              {
-                _gotCounts = true;
-                //_structHandler->writeQueryAllSrc(*this);
-              }
+            if (!_udpAdded) {
+              _udpAdded = true;
+              _structHandler->writeAddAllUdpSrc(*this);
             }
           }
-
+          
         } else {
           if (_logDbg) printf("E unhandled success response\n");
         }
@@ -615,9 +594,9 @@ private:
         nstat_msg_error* perr = (nstat_msg_error*)c;
         if (_logErrors) {
           printf("T error code:%d (0x%x) \n", perr->error, perr->error);
-          if (other != 0L) {
-            uint64_t requestSrcRef = (other->ntsrc != 0L) ?  other->ntsrc->_srcRef : 0L;
-            printf("  for REQUEST (%s) srcRef:%llu\n", _sprintMsg((nstat_msg_hdr*)other->msgbytes.data()).c_str(), requestSrcRef);
+          if (reqMsg.msgbytes.size() > 0) {
+            uint64_t requestSrcRef = (reqMsg.ntsrc != 0L) ?  reqMsg.ntsrc->_srcRef : 0L;
+            printf("  for REQUEST (%s) srcRef:%llu\n", _sprintMsg((nstat_msg_hdr*)reqMsg.msgbytes.data()).c_str(), requestSrcRef);
           }
         }
       }

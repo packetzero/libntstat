@@ -1,6 +1,5 @@
 //  NetworkStatisticsClient.hpp
 //  Copyright © 2017 Alex Malone. All rights reserved.
-//
 
 #ifndef NetworkStatisticsClient_hpp
 #define NetworkStatisticsClient_hpp
@@ -15,6 +14,11 @@ struct NTStatStream;
  *
  * Applications need to implement this interface to receive callbacks
  * from the NetworkStatisticsClient.
+ *
+ * Note: Darwin reports bidirectional UDP conversations as twp separate streams
+ *
+ * TODO: support periodic requests for counts on persistent TCP connections.
+ *
  */
 class NetworkStatisticsListener
 {
@@ -74,10 +78,17 @@ typedef union {
 
 struct NTStatCounters
 {
-  uint64_t rxpackets;
+  uint64_t rxpackets;       // failed if TCP && rxpackets == 0 && txpackets > 0
   uint64_t txpackets;
   uint64_t rxbytes;
   uint64_t txbytes;
+  
+  uint64_t cell_rxbytes;
+  uint64_t cell_txbytes;
+  uint64_t wifi_rxbytes;
+  uint64_t wifi_txbytes;
+  uint64_t wired_rxbytes;  // wnot present for XNU v2422 and earlier
+  uint64_t wired_txbytes;
 };
 
 struct NTStatStreamState
@@ -85,6 +96,7 @@ struct NTStatStreamState
   uint32_t state;      // TCPS_LISTEN, TCPS_SYN_SENT, etc.
   uint32_t txcwindow;  // TCP only
   uint32_t txwindow;   // TCP only
+  //uint32_t connstatus; // TCP only - bitmask
 };
 
 struct NTStatStreamKey
