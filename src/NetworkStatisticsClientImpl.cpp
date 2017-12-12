@@ -53,20 +53,21 @@ NTStatKernelStructHandler* NewNTStatKernel4570();
 
 #define REMOVED_SOURCE_KEEP_SECONDS 30
 #define CLEANUP_SOURCE_LIST_SECONDS 60
+#define UPDATE_STATS_INTERVAL_SECONDS 30
 
 enum
 {
   // generic response messages
   NSTAT_MSG_TYPE_SUCCESS                  = 0
   ,NSTAT_MSG_TYPE_ERROR                   = 1
-  
+
   // Requests
   ,NSTAT_MSG_TYPE_ADD_SRC                 = 1001
   ,NSTAT_MSG_TYPE_ADD_ALL_SRCS            = 1002
   ,NSTAT_MSG_TYPE_REM_SRC                 = 1003
   ,NSTAT_MSG_TYPE_QUERY_SRC               = 1004
   ,NSTAT_MSG_TYPE_GET_SRC_DESC            = 1005
-  
+
   // Responses/Notfications
   ,NSTAT_MSG_TYPE_SRC_ADDED               = 10001
   ,NSTAT_MSG_TYPE_SRC_REMOVED             = 10002
@@ -130,7 +131,9 @@ struct QMsg
 class NetworkStatisticsClientImpl : public NetworkStatisticsClient, public MsgDest
 {
 public:
-  NetworkStatisticsClientImpl(NetworkStatisticsListener* listener): _listener(listener), _map(), _keepRunning(false), _fd(0), _udpAdded(false), _withCounts(false), _gotCounts(false), _seqnum(1), _qmsgMap()
+  NetworkStatisticsClientImpl(NetworkStatisticsListener* listener): _listener(listener), _map(), _keepRunning(false),
+   _fd(0), _udpAdded(false), _gotCounts(false), _seqnum(1), _qmsgMap(),
+   _wantTcp(true), _wantUdp(false), _wantKernel(false), _updateIntervalSeconds(30)
   {
     INC_QMSG();
   }
@@ -143,9 +146,13 @@ public:
     _workingMsg.ntsrc = src;
   }
 
+  virtual void configure(bool wantTcp, bool wantUdp, bool wantKernel, uint32_t updateIntervalSeconds) {
+    _wantTcp = wantTcp; _wantUdp = wantUdp; _wantKernel = wantKernel; _updateIntervalSeconds = updateIntervalSeconds;
+  }
+
   // MsgDest::seqnum
   virtual uint64_t seqnum() { return _seqnum; }
-  
+
   // MsgDest::send
   // The message gets enqueued, and later sent in sendNextMessage()
   virtual void send(nstat_msg_hdr* hdr, size_t len)
@@ -163,12 +170,12 @@ public:
     _outq.push_back(_workingMsg);
 
     // advance sequence number for each message
-    
+
     _seqnum++;
 
     INC_QMSG();
   }
-  
+
   //------------------------------------------------------------------------
   // returns true on success, false otherwise
   //------------------------------------------------------------------------
@@ -237,12 +244,9 @@ public:
 
   //----------------------------------------------------------
   // run
-  // @param withCounts If true, subscribe to SRC_COUNT updates
   //----------------------------------------------------------
-  void run(bool withCounts)
+  void run()
   {
-    _withCounts = withCounts;
-
     if (!isConnected()) {
       printf("E run() not connected.\n"); return;
     }
@@ -263,15 +267,28 @@ public:
     else
       _structHandler = NewNTStatKernel2422();
 
+    // need to start by subscribing to either UDP or TCP
 
-    _structHandler->writeAddAllTcpSrc(*this);
+    if (!_wantTcp)
+      _structHandler->writeAddAllUdpSrc(*this, _wantKernel);
+    else
+      _structHandler->writeAddAllTcpSrc(*this, _wantKernel);
 
     time_t tLastCleanup = time(NULL);
+    time_t tLastUpdate = time(NULL) - 5;
 
     while (_keepRunning)
     {
-      if ((time(NULL) - tLastCleanup) > CLEANUP_SOURCE_LIST_SECONDS) {
+      time_t now = time(NULL);
+
+      if ((now - tLastCleanup) > CLEANUP_SOURCE_LIST_SECONDS) {
+        tLastCleanup = now;
         _removeOldSources();
+      }
+
+      if (_updateIntervalSeconds > 0 && ((now - tLastUpdate) >= _updateIntervalSeconds)) {
+        tLastUpdate = now;
+        _queryAllCounts();
       }
 
       sendNextMsg();
@@ -314,13 +331,13 @@ private:
     while (!_outq.empty())
     {
       // get ref to first message in outq
-    
+
       QMsg &qm = *_outq.begin();
 
       nstat_msg_hdr* hdr = (nstat_msg_hdr*)qm.msgbytes.data();
-      
+
       // avoid sending requests for things we already have
-      
+
       if (hdr->type == NSTAT_MSG_TYPE_GET_SRC_DESC)
       {
         if (0L != qm.ntsrc && qm.ntsrc->_haveDesc) {
@@ -347,9 +364,9 @@ private:
 
       break;
     }
-    
+
   }
-  
+
   //----------------------------------------------------------
   // markSourceForRemove
   //----------------------------------------------------------
@@ -360,7 +377,7 @@ private:
       fit->second->_tsRemoved = time(NULL);
     }
   }
-  
+
   void _markSourceForRemove(NetstatSource *source)
   {
     source->_tsRemoved = time(NULL);
@@ -399,11 +416,11 @@ private:
     to.tv_usec = 100000;
     FD_ZERO (&fds);
     FD_SET (_fd, &fds);
-    
+
     // select on socket, rather than read..
     return (select(_fd +1, &fds, NULL, NULL, &to) > 0);
   }
-  
+
   //----------------------------------------------------------
   // resetSource : allocate and assign to map
   //----------------------------------------------------------
@@ -444,21 +461,21 @@ private:
 
     return retval;
   }
-  
+
   //----------------------------------------------------------
   // return message detail string for consistent logging
   //----------------------------------------------------------
   std::string _sprintMsg(nstat_msg_hdr* hdr, uint64_t srcRef = 0L)
   {
     char tmp[256];
-    
+
     if (hdr == 0L) return "NULL";
 
     sprintf(tmp, "%c %4llu type:%s(%d) len:%d srcRef:%llu", msg_dir(hdr->type), hdr->context, msg_name(hdr->type).c_str(), hdr->type, hdr->length, srcRef);
 
     return string(tmp);
   }
-  
+
   //----------------------------------------------------------
   // _readNextMessage()
   // The KCQ socket is really a queue.  This reads the next
@@ -490,7 +507,7 @@ private:
       reqMsg = fit->second;
       _qmsgMap.erase(fit);
     }
-    
+
     switch (ns->type)
     {
 
@@ -524,18 +541,18 @@ private:
         {
           if (_structHandler->readSrcDesc(ns, num_bytes, &source->obj))
           {
-              source->_haveDesc = true;
+            source->_haveDesc = true;
 
-              // misc cleanups
+            // misc cleanups
 
-              if (source->obj.process.pid == 0) strcpy(source->obj.process.name, "kernel_task");
+            if (source->obj.process.pid == 0) strcpy(source->obj.process.name, "kernel_task");
 
-              // notify application (it not already done)
+            // notify application (it not already done)
 
-              if (!source->_haveNotifiedAdded)
-                _listener->onStreamAdded(&source->obj);
+            if (!source->_haveNotifiedAdded)
+              _listener->onStreamAdded(&source->obj);
 
-              source->_haveNotifiedAdded = true;
+            source->_haveNotifiedAdded = true;
           } else {
             if (_logDbg) printf("E not TCP or UDP provider:%u\n", providerId);
           }
@@ -551,12 +568,17 @@ private:
         if (source != 0L) {
 
           _structHandler->readCounts(ns, num_bytes, source->obj.stats);
-          
+
           if (source->_haveDesc) {
 
-            // TODO: only send updates if asking for it on interval.  most counts are sent right before REMOVE
-            //_listener->onStreamStatsUpdate(&source->obj);
-            
+            // only notify of stat updates for persistent streams with traffic
+
+            time_t now = time(NULL);
+            if (source->_tsRemoved == 0 && (now - source->_tsAdded) > 5) {
+              if (source->obj.stats.rxpackets > 0 || source->obj.stats.txpackets > 0)
+                _listener->onStreamStatsUpdate(&source->obj);
+            }
+
           } else {
             // It appears that for active connections, you get counts() before description
             // ask for it now.
@@ -576,12 +598,12 @@ private:
           {
             // now add UDP
 
-            if (!_udpAdded) {
+            if (_wantUdp && !_udpAdded) {
               _udpAdded = true;
-              _structHandler->writeAddAllUdpSrc(*this);
+              _structHandler->writeAddAllUdpSrc(*this, _wantKernel);
             }
           }
-          
+
         } else {
           if (_logDbg) printf("E unhandled success response\n");
         }
@@ -612,6 +634,11 @@ private:
     return 0;
   }
 
+  void _queryAllCounts()
+  {
+    _structHandler->writeQueryAllSrc(*this);
+  }
+
   void enqueueRequestForSrcDesc(NetstatSource* source)
   {
     // first check to make sure we don't already have a request in flight
@@ -621,17 +648,17 @@ private:
       nstat_msg_hdr *msghdr = (nstat_msg_hdr*)it->msgbytes.data();
       if (0L != tmp && msghdr->type == NSTAT_MSG_TYPE_GET_SRC_DESC && tmp->_srcRef == source->_srcRef) return;
     }
-    
+
     // don't have any matching outstanding requests, so send it
-    
+
     _workingMsg.ntsrc = source;
     _structHandler->writeSrcDesc(*this, source->_providerId, source->_srcRef);
   }
-  
+
   virtual void stop() { _keepRunning = false; }
 
   // private data members
-  
+
   NetworkStatisticsListener*    _listener;
 
   map<uint64_t, NetstatSource*> _map;
@@ -643,16 +670,20 @@ private:
   NTStatKernelStructHandler*    _structHandler;
 
   bool                          _udpAdded;
-  
-  bool                          _withCounts;    // application wants stat counters
-  
+
   bool                          _gotCounts;     // have request counts
 
   vector<QMsg>                  _outq;  // messages that need to be sent
 
   uint16_t                      _seqnum;
-  
+
   map<uint64_t, QMsg>           _qmsgMap; // messages waiting for response
+
+  bool                          _wantTcp;
+  bool                          _wantUdp;
+  bool                          _wantKernel;
+
+  uint32_t                      _updateIntervalSeconds;
 
 };
 
@@ -729,7 +760,7 @@ char msg_dir(uint32_t msg_type)
     case NSTAT_MSG_TYPE_QUERY_SRC:
     case NSTAT_MSG_TYPE_GET_SRC_DESC:
       return '>';
-      
+
     case NSTAT_MSG_TYPE_ERROR:
     case NSTAT_MSG_TYPE_SUCCESS:
     case NSTAT_MSG_TYPE_SRC_ADDED:

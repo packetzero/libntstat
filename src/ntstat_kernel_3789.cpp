@@ -24,7 +24,7 @@ public:
     NTSTAT_MSG_HDR(msg, dest, NSTAT_MSG_TYPE_GET_SRC_DESC);
 
     msg.srcref = srcRef;
-    
+
     dest.send(&msg.hdr, sizeof(msg));
   }
 
@@ -33,7 +33,7 @@ public:
   //--------------------------------------------------------------------
   virtual void writeQueryAllSrc(MsgDest &dest) {
     nstat_msg_query_src_req msg = nstat_msg_query_src_req();
-    
+
     NTSTAT_MSG_HDR(msg, dest, NSTAT_MSG_TYPE_QUERY_SRC);
 
     msg.srcref= NSTAT_SRC_REF_ALL;
@@ -51,19 +51,20 @@ public:
     NTSTAT_MSG_HDR(msg, dest, NSTAT_MSG_TYPE_ADD_ALL_SRCS);
 
     msg.provider = providerId ;
-    
+
     dest.send(&msg.hdr, sizeof(msg));
   }
 
   // xnu-3789 is first time we see split _KERNEL and _USERLAND
 
-  virtual void writeAddAllTcpSrc(MsgDest &dest) {
-    writeAddAllSrc(dest, NSTAT_PROVIDER_TCP_KERNEL);
+  virtual void writeAddAllTcpSrc(MsgDest &dest, bool wantKernel) {
+    if (wantKernel)
+      writeAddAllSrc(dest, NSTAT_PROVIDER_TCP_KERNEL);
     writeAddAllSrc(dest, NSTAT_PROVIDER_TCP_USERLAND);
   }
 
-  virtual void writeAddAllUdpSrc(MsgDest &dest) {
-    writeAddAllSrc(dest, NSTAT_PROVIDER_UDP_KERNEL);
+  virtual void writeAddAllUdpSrc(MsgDest &dest, bool wantKernel) {
+    if (wantKernel) writeAddAllSrc(dest, NSTAT_PROVIDER_UDP_KERNEL);
     writeAddAllSrc(dest, NSTAT_PROVIDER_UDP_USERLAND);
   }
 
@@ -190,7 +191,7 @@ public:
 
     dest.wifi_rxbytes = msg->counts.nstat_wifi_rxbytes;
     dest.wifi_txbytes = msg->counts.nstat_wifi_txbytes;
-    
+
     dest.wired_rxbytes = msg->counts.nstat_wired_rxbytes;
     dest.wired_txbytes = msg->counts.nstat_wired_txbytes;
   }

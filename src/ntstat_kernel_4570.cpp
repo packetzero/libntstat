@@ -14,57 +14,59 @@ using namespace std;
 class NTStatKernel4570 : public NTStatKernelStructHandler
 {
 public:
-  
+
   //--------------------------------------------------------------------
   // write GET_SRC_DESC message to dest
   //--------------------------------------------------------------------
   virtual void writeSrcDesc(MsgDest &dest, uint64_t providerId, uint64_t srcRef )
   {
     nstat_msg_get_src_description msg = nstat_msg_get_src_description();
-    
+
     NTSTAT_MSG_HDR(msg, dest, NSTAT_MSG_TYPE_GET_SRC_DESC);
-    
+
     msg.srcref = srcRef;
-    
+
     dest.send(&msg.hdr, sizeof(msg));
   }
-  
+
   //--------------------------------------------------------------------
   // write QUERY_SRC message to dest
   //--------------------------------------------------------------------
   virtual void writeQueryAllSrc(MsgDest &dest) {
     nstat_msg_query_src_req msg = nstat_msg_query_src_req();
-    
+
     NTSTAT_MSG_HDR(msg, dest, NSTAT_MSG_TYPE_QUERY_SRC);
-    
+
     msg.srcref= NSTAT_SRC_REF_ALL;
-    
+
     dest.send(&msg.hdr, sizeof(msg));
   }
-  
+
   //--------------------------------------------------------------------
   // write ADD_ADD_SRCS message to dest
   //--------------------------------------------------------------------
   virtual void writeAddAllSrc(MsgDest &dest, uint32_t providerId)
   {
     nstat_msg_add_all_srcs msg = nstat_msg_add_all_srcs();
-    
+
     NTSTAT_MSG_HDR(msg, dest, NSTAT_MSG_TYPE_ADD_ALL_SRCS);
-    
+
     msg.provider = providerId ;
-    
+
     dest.send(&msg.hdr, sizeof(msg));
   }
-  
+
   // xnu-3789 is first time we see split _KERNEL and _USERLAND
-  
-  virtual void writeAddAllTcpSrc(MsgDest &dest) {
-    writeAddAllSrc(dest, NSTAT_PROVIDER_TCP_KERNEL);
+
+  virtual void writeAddAllTcpSrc(MsgDest &dest, bool wantKernel) {
+    if (wantKernel)
+      writeAddAllSrc(dest, NSTAT_PROVIDER_TCP_KERNEL);
     writeAddAllSrc(dest, NSTAT_PROVIDER_TCP_USERLAND);
   }
-  
-  virtual void writeAddAllUdpSrc(MsgDest &dest) {
-    writeAddAllSrc(dest, NSTAT_PROVIDER_UDP_KERNEL);
+
+  virtual void writeAddAllUdpSrc(MsgDest &dest, bool wantKernel) {
+    if (wantKernel)
+      writeAddAllSrc(dest, NSTAT_PROVIDER_UDP_KERNEL);
     writeAddAllSrc(dest, NSTAT_PROVIDER_UDP_USERLAND);
   }
 
@@ -187,10 +189,10 @@ public:
 
     dest.cell_rxbytes = msg->counts.nstat_cell_rxbytes;
     dest.cell_txbytes = msg->counts.nstat_cell_txbytes;
-    
+
     dest.wifi_rxbytes = msg->counts.nstat_wifi_rxbytes;
     dest.wifi_txbytes = msg->counts.nstat_wifi_txbytes;
-    
+
     dest.wired_rxbytes = msg->counts.nstat_wired_rxbytes;
     dest.wired_txbytes = msg->counts.nstat_wired_txbytes;
   }

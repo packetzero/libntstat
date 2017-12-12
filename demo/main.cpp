@@ -34,9 +34,10 @@ class MyNetstatListener : public NetworkStatisticsListener
 
   void log(const NTStatStream* stream, char displayChar)
   {
-    if (stream->key.ipproto == IPPROTO_TCP && stream->states.state == TCPS_LISTEN)
+    if (IS_LISTEN_PORT(stream))
     {
-      printf(" @ %s pid:%u (%s) LISTEN TCP port:%u\n", timestr().c_str(), stream->process.pid, stream->process.name, ntohs(stream->key.lport));
+       printf(" @%c %s pid:%u (%s) LISTEN %s port:%u\n", displayChar, timestr().c_str(), stream->process.pid,
+              stream->process.name,(stream->key.ipproto == IPPROTO_TCP ? "TCP" : "UDP"), ntohs(stream->key.lport));
     }
     else
     {
@@ -75,9 +76,13 @@ int main(int argc, const char * argv[])
     return 2;
   }
 
+  // configure
+  bool wantTcp=true, wantUdp=false, wantKernel=true;
+  uint32_t updateIntervalSeconds = 60;
+  netstatClient->configure(wantTcp, wantUdp, wantKernel, updateIntervalSeconds);
+  
   // in a real app, we would want to run this in a dedicated thread
-  bool wantStats = true;
-  netstatClient->run(wantStats);
+  netstatClient->run();
   
   return 0;
 }

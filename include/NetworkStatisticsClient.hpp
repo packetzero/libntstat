@@ -26,7 +26,7 @@ public:
   virtual void onStreamAdded(const NTStatStream *stream)=0;
 
   virtual void onStreamRemoved(const NTStatStream *stream)=0;
-  
+
   virtual void onStreamStatsUpdate(const NTStatStream *stream)=0;
 };
 
@@ -53,10 +53,21 @@ public:
   /*
    * Blocking: run from dedicated thread.  Subscribes to TCP/UDP and continuously reads messages.
    * The connection to the kernel will be disconnected when run() exits.
-   * @params:
-   *   withCounts    If false, listener is only notified when streams added or removed (no count updates).
    */
-  virtual void run(bool withCounts) = 0;
+  virtual void run() = 0;
+
+  /*
+   * configure() - needs to be called prior to run()
+   *
+   * @param wantTcp If true, include TCP streams. Default: true.
+   * @param wantUdp If true, include UDP streams. Default: false.
+   * @param wantKernel  Default: true.  El Capitan and later, provide the option to
+   *                filter KERNEL and USER traffic.  However, Sierra reports all TCP
+   *                as kernel traffic.
+   * @param updateIntervalSeconds  Interval in seconds to receive stat updates on persistent
+   *                               connections.  If zero, this feature is turned off. Default: 30.
+   */
+  virtual void configure(bool wantTcp, bool wantUdp, bool wantKernel, uint32_t updateIntervalSeconds) = 0;
 
   /*
    * Will set the stop flag, so run() will exit.
@@ -82,7 +93,7 @@ struct NTStatCounters
   uint64_t txpackets;
   uint64_t rxbytes;
   uint64_t txbytes;
-  
+
   uint64_t cell_rxbytes;
   uint64_t cell_txbytes;
   uint64_t wifi_rxbytes;
@@ -96,7 +107,6 @@ struct NTStatStreamState
   uint32_t state;      // TCPS_LISTEN, TCPS_SYN_SENT, etc.
   uint32_t txcwindow;  // TCP only
   uint32_t txwindow;   // TCP only
-  //uint32_t connstatus; // TCP only - bitmask
 };
 
 struct NTStatStreamKey
@@ -109,7 +119,7 @@ struct NTStatStreamKey
   uint16_t    rport;   // remove port (network-endian)
   addr_t      local;
   addr_t      remote;
-  
+
   bool operator<(const NTStatStreamKey& b) const; // needed to be a key type for std::map
 };
 
@@ -124,11 +134,15 @@ struct NTStatStream
   // these are constant once we see the stream
   NTStatStreamKey    key;
   NTStatProcess      process;
-  
+
   // these get updated
   NTStatCounters     stats;
   NTStatStreamState  states;
-  
+
 };
+
+// convenience macros
+
+#define IS_LISTEN_PORT(pstream) (0 == (pstream)->key.rport)
 
 #endif /* NetworkStatisticsClient_hpp */
