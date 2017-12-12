@@ -61,7 +61,7 @@ public:
    *
    * @param wantTcp If true, include TCP streams. Default: true.
    * @param wantUdp If true, include UDP streams. Default: false.
-   * @param wantKernel  Default: true.  El Capitan and later, provide the option to
+   * @param wantKernel  Default: true.  MacOS 10.12 Sierra and later, provide the option to
    *                filter KERNEL and USER traffic.  However, Sierra reports all TCP
    *                as kernel traffic.
    * @param updateIntervalSeconds  Interval in seconds to receive stat updates on persistent

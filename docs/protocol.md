@@ -8,7 +8,7 @@ This document gives an overview of the API that can be used by applications to r
 
 ### Terminology
 
-**Source**  A source is a bi-directional TCP connection, or uni-directional UDP flow.  The kernel assigns a unique srcRef to each source.  The srcRef datatype changed from uin32_t to uint64_t in XNU version 3789 (El Capitan).
+**Source**  A source is a bi-directional TCP connection, or uni-directional UDP flow.  The kernel assigns a unique srcRef to each source.  The srcRef datatype changed from uin32_t to uint64_t in XNU version 3789 (Sierra).
 
 ### Struct header
 Each request and response message is a struct that starts with the following header.  The *context* field is used by the application to match response messages to the request message.  The *type* field needs to be one of the *NSTAT_MSG_TYPE_* enum values.  The *length* field should match the length of the request or response message struct.  The kernel (and application) can use this as a versioning check, as some message structs have different size across kernel versions.

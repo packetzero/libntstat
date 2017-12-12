@@ -36,4 +36,4 @@ XNU version:3789
 ```
 
 ### Credits
-This is based on lsock by Jonathan Levin (http://newosxbook.com/index.php?page=code).  There were several significant changes to the socket protocol in El Capitan that breaks lsock.
+This is based on lsock by Jonathan Levin (http://newosxbook.com/index.php?page=code).  There were several significant changes to the socket protocol in 10.12 Sierra (XNU v3789) that breaks lsock.

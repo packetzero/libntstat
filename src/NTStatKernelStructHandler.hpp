@@ -46,7 +46,8 @@ public:
 
   /*
    * write NSTAT_MSG_TYPE_ADD_ALL_SRCS for TCP or UDP
-   * @param wantKernel If true, include kernel traffic (El Capitan gives a choice)
+   * @param wantKernel If true, include kernel traffic
+   *       (10.12 Sierra XNU v3789 gives a choice)
    */
   virtual void writeAddAllTcpSrc(MsgDest &dest, bool wantKernel) = 0;
   virtual void writeAddAllUdpSrc(MsgDest &dest, bool wantKernel) = 0;

@@ -1,6 +1,6 @@
 // https://github.com/apple/darwin-xnu
 // git checkout xnu-2422.115.4
-// Mountain Lion 10.8
+// Mavericks 10.9
 
 // bsd/netinet/tcp.h
 struct tcp_conn_status {
