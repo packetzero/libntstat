@@ -31,14 +31,6 @@
 #include <vector>
 using namespace std;
 
-// pthread macros
-
-#include <pthread.h>
-#define MUTEX_T pthread_mutex_t
-#define MUINIT(pMu) pthread_mutex_init ( (pMu), 0)
-#define MULOCK(pMu) pthread_mutex_lock ( pMu)
-#define MUUNLOCK(pMu) pthread_mutex_unlock ( pMu)
-
 // references to the factory functions to allocate struct handlers for kernel versions
 
 NTStatKernelStructHandler* NewNTStatKernel2422();

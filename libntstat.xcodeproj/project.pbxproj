@@ -18,7 +18,6 @@
 		05313D301FD9F5A5006FB69A /* ntstat_kernel_3248.h in Headers */ = {isa = PBXBuildFile; fileRef = 05313D271FD9F5A4006FB69A /* ntstat_kernel_3248.h */; };
 		05313D311FD9F5A5006FB69A /* ntstat_kernel_4570.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 05313D281FD9F5A4006FB69A /* ntstat_kernel_4570.cpp */; };
 		05313D321FD9F5A5006FB69A /* ntstat_kernel_2050.h in Headers */ = {isa = PBXBuildFile; fileRef = 05313D291FD9F5A5006FB69A /* ntstat_kernel_2050.h */; };
-		05313D331FD9F5A5006FB69A /* ntstat_kernel_3247.h in Headers */ = {isa = PBXBuildFile; fileRef = 05313D2A1FD9F5A5006FB69A /* ntstat_kernel_3247.h */; };
 		05313D361FD9F7AB006FB69A /* ntstat_kernel_2782.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 05313D341FD9F7AB006FB69A /* ntstat_kernel_2782.cpp */; };
 		05313D371FD9F7AB006FB69A /* ntstat_kernel_2422.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 05313D351FD9F7AB006FB69A /* ntstat_kernel_2422.cpp */; };
 		05313D391FDA051F006FB69A /* NetworkStatisticsClientImpl.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 05313D381FDA051F006FB69A /* NetworkStatisticsClientImpl.cpp */; };
@@ -60,7 +59,6 @@
 		05313D271FD9F5A4006FB69A /* ntstat_kernel_3248.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = ntstat_kernel_3248.h; path = src/ntstat_kernel_3248.h; sourceTree = "<group>"; };
 		05313D281FD9F5A4006FB69A /* ntstat_kernel_4570.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; name = ntstat_kernel_4570.cpp; path = src/ntstat_kernel_4570.cpp; sourceTree = "<group>"; };
 		05313D291FD9F5A5006FB69A /* ntstat_kernel_2050.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = ntstat_kernel_2050.h; path = src/ntstat_kernel_2050.h; sourceTree = "<group>"; };
-		05313D2A1FD9F5A5006FB69A /* ntstat_kernel_3247.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = ntstat_kernel_3247.h; path = src/ntstat_kernel_3247.h; sourceTree = "<group>"; };
 		05313D341FD9F7AB006FB69A /* ntstat_kernel_2782.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; name = ntstat_kernel_2782.cpp; path = src/ntstat_kernel_2782.cpp; sourceTree = "<group>"; };
 		05313D351FD9F7AB006FB69A /* ntstat_kernel_2422.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; name = ntstat_kernel_2422.cpp; path = src/ntstat_kernel_2422.cpp; sourceTree = "<group>"; };
 		05313D381FDA051F006FB69A /* NetworkStatisticsClientImpl.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; name = NetworkStatisticsClientImpl.cpp; path = src/NetworkStatisticsClientImpl.cpp; sourceTree = "<group>"; };
@@ -112,7 +110,6 @@
 				05313D291FD9F5A5006FB69A /* ntstat_kernel_2050.h */,
 				05313D251FD9F5A4006FB69A /* ntstat_kernel_2422.h */,
 				05313D241FD9F5A4006FB69A /* ntstat_kernel_2782.h */,
-				05313D2A1FD9F5A5006FB69A /* ntstat_kernel_3247.h */,
 				05313D221FD9F5A3006FB69A /* ntstat_kernel_3248.cpp */,
 				05313D271FD9F5A4006FB69A /* ntstat_kernel_3248.h */,
 				05313D231FD9F5A4006FB69A /* ntstat_kernel_3789.h */,
@@ -142,7 +139,6 @@
 			isa = PBXHeadersBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				05313D331FD9F5A5006FB69A /* ntstat_kernel_3247.h in Headers */,
 				05313D301FD9F5A5006FB69A /* ntstat_kernel_3248.h in Headers */,
 				05313D2D1FD9F5A5006FB69A /* ntstat_kernel_2782.h in Headers */,
 				05313D2C1FD9F5A5006FB69A /* ntstat_kernel_3789.h in Headers */,
