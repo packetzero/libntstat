@@ -805,6 +805,9 @@ bool NTStatStreamKey::operator<(const NTStatStreamKey& b) const
   } else {
     if (local.addr4.s_addr < b.local.addr4.s_addr) return true;
     if (local.addr4.s_addr > b.local.addr4.s_addr) return false;
+
+    if (remote.addr4.s_addr < b.remote.addr4.s_addr) return true;
+    if (remote.addr4.s_addr > b.remote.addr4.s_addr) return false;
   }
   return false;
 }
