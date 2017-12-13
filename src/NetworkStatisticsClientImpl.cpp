@@ -440,6 +440,7 @@ private:
 
     if (0L == src) {
       src = new NetstatSource(srcRef, providerId);
+      src->obj.id = srcRef;
       src->_tsAdded = time(NULL);
       _map[srcRef] = src;
     }

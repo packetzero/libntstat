@@ -46,8 +46,8 @@ class MyNetstatListener : public NetworkStatisticsListener
       if (displayChar == '-' && stream->key.ipproto == IPPROTO_TCP &&
           stream->stats.rxpackets == 0) notes = "FAILED";
       
-      printf(" %c %s %s pid:%u (%s) %s\n", displayChar, timestr().c_str(),
-           stream2text(stream->key).c_str(), stream->process.pid, stream->process.name, notes.c_str());
+      printf(" %c %s %s pid:%u (%s) %s id:%llu\n", displayChar, timestr().c_str(),
+           stream2text(stream->key).c_str(), stream->process.pid, stream->process.name, notes.c_str(), stream->id);
 
       // write bytes if present on update/remove
 

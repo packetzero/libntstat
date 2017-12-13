@@ -132,6 +132,7 @@ struct NTStatProcess
 struct NTStatStream
 {
   // these are constant once we see the stream
+  uint64_t           id;     // Stream ID provided by kernel. Unique for app runtime. Can rollover at uint32_t, so id can be reused.
   NTStatStreamKey    key;
   NTStatProcess      process;
 
