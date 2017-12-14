@@ -15,9 +15,7 @@ struct NTStatStream;
  * Applications need to implement this interface to receive callbacks
  * from the NetworkStatisticsClient.
  *
- * Note: Darwin reports bidirectional UDP conversations as twp separate streams
- *
- * TODO: support periodic requests for counts on persistent TCP connections.
+ * Note: Darwin reports bidirectional UDP conversations as two separate streams
  *
  */
 class NetworkStatisticsListener
@@ -30,6 +28,17 @@ public:
   virtual void onStreamStatsUpdate(const NTStatStream *stream)=0;
 };
 
+// this is for testing... you can ignore
+class NTStatClientEmulation
+{
+public:
+  // saves all messages (requests and responses) to "./ntstat-xnu-<version>.bin"
+  virtual void enableRecording() = 0;
+
+  // in the place of run(), this will process messages from filename
+  virtual void runRecording(char *filename, unsigned int xnuVersion) = 0;
+};
+
 /*
  * NetworkStatisticsClient
  *
@@ -37,7 +46,7 @@ public:
  * Behind the scenes, the implementation creates a system socket, subscribes
  * to TCP and UDP sources, and passes along the data to the listener.
  */
-class NetworkStatisticsClient /* interface */
+class NetworkStatisticsClient : public NTStatClientEmulation
 {
 public:
   /*
@@ -73,7 +82,6 @@ public:
    * Will set the stop flag, so run() will exit.
    */
   virtual void stop() = 0;
-
 };
 
 // Instantiate (singleton) the NetworkStatisticsClient

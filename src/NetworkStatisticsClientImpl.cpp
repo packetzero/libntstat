@@ -20,6 +20,7 @@
 #include <errno.h>
 #include <unistd.h>
 #include <stdio.h>
+#include <fcntl.h>
 
 #include <sys/utsname.h>
 #include <sys/sys_domain.h>
@@ -125,7 +126,7 @@ class NetworkStatisticsClientImpl : public NetworkStatisticsClient, public MsgDe
 public:
   NetworkStatisticsClientImpl(NetworkStatisticsListener* listener): _listener(listener), _map(), _keepRunning(false),
    _fd(0), _udpAdded(false), _gotCounts(false), _seqnum(1), _qmsgMap(),
-   _wantTcp(true), _wantUdp(false), _wantKernel(false), _updateIntervalSeconds(30)
+   _wantTcp(true), _wantUdp(false), _wantKernel(false), _updateIntervalSeconds(30), _recordEnabled(false), _recordFd(0)
   {
     INC_QMSG();
   }
@@ -149,6 +150,8 @@ public:
   // The message gets enqueued, and later sent in sendNextMessage()
   virtual void send(nstat_msg_hdr* hdr, size_t len)
   {
+    if (_inReplayMode()) return;
+
     if (_logTrace) printf("T ENQ %s\n", _sprintMsg(hdr).c_str() );
 
     // make copy of message bytes
@@ -167,6 +170,8 @@ public:
 
     INC_QMSG();
   }
+  
+  bool _inReplayMode() { return (_recordFd > 0 && _recordEnabled == false); }
 
   //------------------------------------------------------------------------
   // returns true on success, false otherwise
@@ -234,18 +239,8 @@ public:
     return (_fd > 0);
   }
 
-  //----------------------------------------------------------
-  // run
-  //----------------------------------------------------------
-  void run()
+  void _loadStructHandler(unsigned int xnuVersion)
   {
-    if (!isConnected()) {
-      printf("E run() not connected.\n"); return;
-    }
-
-    _keepRunning = true;
-    unsigned int xnuVersion = getXnuVersion();
-
     printf("XNU version:%d\n", xnuVersion);
 
     if (xnuVersion > 3800)
@@ -258,6 +253,21 @@ public:
       _structHandler = NewNTStatKernel2782();
     else
       _structHandler = NewNTStatKernel2422();
+  }
+
+  //----------------------------------------------------------
+  // run
+  //----------------------------------------------------------
+  void run()
+  {
+    if (!isConnected()) {
+      printf("E run() not connected.\n"); return;
+    }
+
+    _keepRunning = true;
+    unsigned int xnuVersion = getXnuVersion();
+
+    _loadStructHandler(xnuVersion);
 
     // need to start by subscribing to either UDP or TCP
 
@@ -307,6 +317,8 @@ private:
     nstat_msg_hdr* hdr = (nstat_msg_hdr*)qm.msgbytes.data();
 
     if (_logSendReceive) printf("T SEND %s\n", _sprintMsg(hdr).c_str());
+
+    if (_recordEnabled) RECORD(qm.msgbytes.data(), qm.msgbytes.size());
 
     ssize_t rc = write (_fd, qm.msgbytes.data(), qm.msgbytes.size());
 
@@ -470,23 +482,51 @@ private:
   }
 
   //----------------------------------------------------------
+  // Isolates read() on socket fd
+  // If record-mode enabled, also writes to file
+  //----------------------------------------------------------
+  int _socketRead(char* dest, int destsize)
+  {
+    int num_bytes = (int)read (_fd, dest, destsize);
+
+    if (_logDbg) printf("D READ %d bytes\n", num_bytes);
+
+    if (num_bytes > 0 && _recordEnabled) RECORD(dest, num_bytes);
+
+    return num_bytes;
+  }
+
+  void RECORD(const void *src, unsigned int num_bytes)
+  {
+    nstat_msg_hdr *hdr = (nstat_msg_hdr*)src;
+    uint32_t now = (uint32_t)time(NULL);      // hardcode to 32-bit for platform consistency
+    write(_recordFd, &now, sizeof(now));
+    write(_recordFd, src, num_bytes);
+  }
+
+  //----------------------------------------------------------
   // _readNextMessage()
   // The KCQ socket is really a queue.  This reads the next
   // message off the queue
   //----------------------------------------------------------
   int _readNextMessage()
   {
-    uint64_t srcRef = 0L;
-    uint32_t providerId = 0;
     char c[BUFSIZE];
 
-    int num_bytes = (int)read (_fd, c, BUFSIZE);
-
-    if (_logDbg) printf("D READ %d bytes\n", num_bytes);
-
+    int num_bytes = _socketRead(c, BUFSIZE);
     if (num_bytes <= 0) return -1;
 
-    nstat_msg_hdr *ns = (nstat_msg_hdr *) c;
+    return _handleResponseMessage((nstat_msg_hdr *) c, num_bytes);
+  }
+
+  //----------------------------------------------------------
+  // _handleResponseMessage()
+  // Separated from _socketRead for testing purposes.
+  //----------------------------------------------------------
+  int _handleResponseMessage(nstat_msg_hdr* ns, int num_bytes)
+  {
+    uint64_t srcRef = 0L;
+    uint32_t providerId = 0;
     _structHandler->getSrcRef(ns, num_bytes, srcRef, providerId);
 
     if (_logSendReceive) printf("T RECV %s\n", _sprintMsg(ns, srcRef).c_str());
@@ -606,7 +646,7 @@ private:
       case NSTAT_MSG_TYPE_ERROR:
       {
         // Error message
-        nstat_msg_error* perr = (nstat_msg_error*)c;
+        nstat_msg_error* perr = (nstat_msg_error*)ns;
         if (_logErrors) {
           printf("T error code:%d (0x%x) \n", perr->error, perr->error);
           if (reqMsg.msgbytes.size() > 0) {
@@ -650,6 +690,103 @@ private:
 
   virtual void stop() { _keepRunning = false; }
 
+  //----------------------------------------------------------
+  // enableRecording()
+  //----------------------------------------------------------
+  virtual void enableRecording()
+  {
+    char filename[64];
+    sprintf(filename, "ntstat-xnu-%d.bin", getXnuVersion());
+
+    _recordFd = open(filename, O_CREAT | O_WRONLY | O_SYNC, 0664);
+    if (_recordFd <= 0) {
+      printf("ERROR: unable to open %s for writing\n", filename);
+      return;
+    }
+    _recordEnabled = true;
+  }
+
+  //----------------------------------------------------------
+  // emulate run() without an actual kernel connection by
+  // reading and processing ntstat messages from file
+  //----------------------------------------------------------
+  virtual void runRecording(char *filename, unsigned int xnuVersion)
+  {
+    uint32_t tLast = 0;
+    _recordFd = open(filename, O_RDONLY);
+    if (_recordFd <= 0) {
+      printf("ERROR: unable to open %s for reading\n", filename);
+      return;
+    }
+
+    _loadStructHandler(xnuVersion);
+
+    while (true)
+    {
+      vector<uint8_t> vec;
+      vec.resize(sizeof(nstat_msg_hdr));
+      nstat_msg_hdr *hdr = (nstat_msg_hdr*)vec.data();
+
+      // read timestamp
+      uint32_t now;
+      int num_bytes = (int)read(_recordFd, &now, sizeof(now));
+      if (num_bytes < sizeof(now)) {
+        // end of file?
+        break;
+      }
+
+      // read message header
+
+      num_bytes = (int)read(_recordFd, hdr, vec.size());
+      if (num_bytes != vec.size()) {
+        printf("WARN: partial read in recording\n");
+        break;
+      }
+
+      // sanity check
+      if (hdr->length < sizeof(nstat_msg_hdr) ||  hdr->length > 2048) {
+        printf("ERROR: invalid length in recorded message: %d\n", hdr->length);
+        break;
+      }
+
+      // now read rest of current message
+      int delta = hdr->length - num_bytes;
+      vec.resize(num_bytes + delta);
+      num_bytes = (int)read(_recordFd, (unsigned char*)vec.data() + num_bytes, delta);
+
+      if (num_bytes != delta) {
+        printf("WARN: partial read in recording - past header\n");
+        break;
+      }
+
+      switch(hdr->type) {
+        case NSTAT_MSG_TYPE_ADD_SRC:
+        case NSTAT_MSG_TYPE_QUERY_SRC:
+        case NSTAT_MSG_TYPE_GET_SRC_DESC:
+        case NSTAT_MSG_TYPE_ADD_ALL_SRCS:
+        case NSTAT_MSG_TYPE_REM_SRC:
+        {
+          // this is a request
+          QMsg qmsg = QMsg();
+          qmsg.seqnum = hdr->context;
+          qmsg.msgbytes = vec;
+          qmsg.ntsrc = 0L;      // TODO: lookup
+          _qmsgMap[hdr->context] = qmsg;
+          break;
+        }
+        default:
+          // response
+          int secDelay = now - tLast;
+          if (secDelay > 0 && tLast != 0) sleep(secDelay);  // try to somewhat emulate natural rate
+          _handleResponseMessage((nstat_msg_hdr*)vec.data(), hdr->length);
+          break;
+      }
+
+      tLast = now;
+    }
+
+  }
+
   // private data members
 
   NetworkStatisticsListener*    _listener;
@@ -677,6 +814,9 @@ private:
   bool                          _wantKernel;
 
   uint32_t                      _updateIntervalSeconds;
+
+  bool                          _recordEnabled;
+  int                           _recordFd;
 
 };
 
