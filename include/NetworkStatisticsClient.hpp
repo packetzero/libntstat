@@ -39,6 +39,12 @@ public:
   virtual void runRecording(char *filename, unsigned int xnuVersion) = 0;
 };
 
+const int NTSTAT_LOGF_ERROR    = (1 << 1);
+const int NTSTAT_LOGF_SENDRECV = (1 << 2);
+const int NTSTAT_LOGF_DEBUG    = (1 << 3);
+const int NTSTAT_LOGF_TRACE    = (1 << 4);
+const int NTSTAT_LOGF_DROPS    = (1 << 5);
+
 /*
  * NetworkStatisticsClient
  *
@@ -82,6 +88,19 @@ public:
    * Will set the stop flag, so run() will exit.
    */
   virtual void stop() = 0;
+
+  /*
+   * configure logging. Default flags == 0, no logging.
+   */
+  virtual void setLogging(uint8_t flags) = 0;
+
+  /*
+   * returns the number of ENOBUFS errors received from kernel, indicating
+   * the inability to send some requested information due to full buffer.
+   * See docs/protocol.md for more details.
+   */
+  virtual uint32_t getNumDrops() = 0;
+
 };
 
 // Instantiate (singleton) the NetworkStatisticsClient

@@ -44,10 +44,6 @@ NTStatKernelStructHandler* NewNTStatKernel4570();
 
 #define      NET_STAT_CONTROL_NAME   "com.apple.network.statistics"
 
-#define REMOVED_SOURCE_KEEP_SECONDS 30
-#define CLEANUP_SOURCE_LIST_SECONDS 60
-#define UPDATE_STATS_INTERVAL_SECONDS 30
-
 enum
 {
   // generic response messages
@@ -76,18 +72,23 @@ typedef struct nstat_msg_error
   u_int8_t        reserved[4];
 } nstat_msg_error;
 
-// Make these true to add more debug logging
+// local defs
 
-static bool _logDbg = false;
-static bool _logTrace = false;
-static bool _logErrors = true;
-static bool _logSendReceive = false;
+#define REMOVED_SOURCE_KEEP_SECONDS 30
+#define CLEANUP_SOURCE_LIST_SECONDS 60
+#define UPDATE_STATS_INTERVAL_SECONDS 30
 
 const int BUFSIZE = 2048;
 
 string msg_name(uint32_t msg_type);
 char msg_dir(uint32_t msg_type);
 unsigned int getXnuVersion();
+
+#define LOG_ERROR(a)     if (_logFlags & NTSTAT_LOGF_ERROR) printf a
+#define LOG_SENDRECV(a)  if (_logFlags & NTSTAT_LOGF_SENDRECV) printf a
+#define LOG_DEBUG(a)     if (_logFlags & NTSTAT_LOGF_DEBUG) printf a
+#define LOG_TRACE(a)     if (_logFlags & NTSTAT_LOGF_TRACE) printf a
+#define LOG_DROPS(a)     if (_logFlags & NTSTAT_LOGF_DROPS) printf a
 
 /*
  * Wrapper around NTStatStream so we can track srcRef
@@ -117,6 +118,15 @@ struct QMsg
   NetstatSource*   ntsrc;
 };
 
+enum {
+  STATE_START
+  ,STATE_REQUEST_TCP_SRC
+  ,STATE_REQUEST_TCP_SRC_DESC
+  ,STATE_REQUEST_UDP_SRC
+  ,STATE_REQUEST_UDP_SRC_DESC
+  ,STATE_NORMAL
+  ,STATE_REQUEST_COUNT_UPDATE
+};
 
 /*
  * Implementation of NetworkStatisticsClient
@@ -126,7 +136,7 @@ class NetworkStatisticsClientImpl : public NetworkStatisticsClient, public MsgDe
 public:
   NetworkStatisticsClientImpl(NetworkStatisticsListener* listener): _listener(listener), _map(), _keepRunning(false),
    _fd(0), _udpAdded(false), _gotCounts(false), _seqnum(1), _qmsgMap(),
-   _wantTcp(true), _wantUdp(false), _wantKernel(false), _updateIntervalSeconds(30), _recordEnabled(false), _recordFd(0), _numDrops(0)
+   _wantTcp(true), _wantUdp(false), _wantKernel(false), _updateIntervalSeconds(30), _recordEnabled(false), _recordFd(0), _numDrops(0), _logFlags(0)
   {
     INC_QMSG();
   }
@@ -152,7 +162,7 @@ public:
   {
     if (_inReplayMode()) return;
 
-    if (_logTrace) printf("T ENQ %s\n", _sprintMsg(hdr).c_str() );
+    LOG_TRACE(("T ENQ %s\n", _sprintMsg(hdr).c_str() ));
 
     // make copy of message bytes
 
@@ -221,7 +231,7 @@ public:
     {
       fprintf(stderr,"connect(AF_SYS_CONTROL): %s\n", strerror(errno));
     } else {
-      if (_logDbg) printf("socket id:%d unit:%d\n", ctlInfo.ctl_id, sc.sc_unit);
+      LOG_DEBUG(("socket id:%d unit:%d\n", ctlInfo.ctl_id, sc.sc_unit));
       return true;
     }
 
@@ -321,21 +331,21 @@ private:
       if ((qm.ntsrc->_tsRemoved != 0) ||
           ((hdr->type == NSTAT_MSG_TYPE_QUERY_SRC || hdr->type == NSTAT_MSG_TYPE_GET_SRC_DESC) && qm.ntsrc->_haveDesc))
       {
-        if (_logDbg) {
+        if (_logFlags & NTSTAT_LOGF_DROPS) {
           uint32_t providerId=0;
           uint64_t srcRef=0L;
           _structHandler->getSrcRef(hdr, (int)qm.msgbytes.size(), srcRef, providerId);
-          printf("D DROP %s\n",_sprintMsg(hdr, srcRef).c_str());
+          LOG_DROPS(("D DROP %s\n",_sprintMsg(hdr, srcRef).c_str()));
         }
         return true;
       }
     }
 
-    if (_logSendReceive) {
+    if (_logFlags & NTSTAT_LOGF_SENDRECV) {
       uint32_t providerId=0;
       uint64_t srcRef=0L;
       _structHandler->getSrcRef(hdr, (int)qm.msgbytes.size(), srcRef, providerId);
-      printf("T SEND %s\n", _sprintMsg(hdr, srcRef).c_str());
+      LOG_SENDRECV(("T SEND %s\n", _sprintMsg(hdr, srcRef).c_str()));
     }
 
     if (_recordEnabled) RECORD(qm.msgbytes.data(), (unsigned int)qm.msgbytes.size());
@@ -380,7 +390,7 @@ private:
       if (!SEND(qm))
       {
         // error ... drop on floor
-        if (_logErrors) printf("E Failed to send\n");
+        LOG_ERROR(("E Failed to send\n"));
       }
 
       // pop off message sent
@@ -457,7 +467,7 @@ private:
       if (fit->second->_tsRemoved > 0) {
         _map.erase(fit++);
       } else {
-        if (_logErrors) printf("add for existing src\n");
+        LOG_ERROR(("add for existing src\n"));
         src = fit->second;
       }
     }
@@ -509,7 +519,7 @@ private:
   {
     int num_bytes = (int)read (_fd, dest, destsize);
 
-    if (_logDbg) printf("D READ %d bytes\n", num_bytes);
+    LOG_DEBUG(("D READ %d bytes\n", num_bytes));
 
     if (num_bytes > 0 && _recordEnabled) RECORD(dest, num_bytes);
 
@@ -547,6 +557,18 @@ private:
 
     return _handleResponseMessage((nstat_msg_hdr *) c, num_bytes);
   }
+  
+  //----------------------------------------------------------
+  // Given the request message to ADD_ALL_SRC, extract
+  // the providerId and request GET_SRC_DESC for ALL.
+  //----------------------------------------------------------
+  void _queryAllSrcDesc(nstat_msg_hdr* addAllSrcReqHdr, uint32_t reqMsgLen)
+  {
+    uint32_t providerId=0;
+    uint64_t reqSrcRef=0L;
+    _structHandler->getSrcRef(addAllSrcReqHdr, reqMsgLen, reqSrcRef, providerId);
+    _structHandler->writeSrcDesc(*this, providerId, (uint64_t)-1);
+  }
 
   //----------------------------------------------------------
   // _handleResponseMessage()
@@ -558,7 +580,7 @@ private:
     uint32_t providerId = 0;
     _structHandler->getSrcRef(ns, num_bytes, srcRef, providerId);
 
-    if (_logSendReceive) printf("T RECV %s\n", _sprintMsg(ns, srcRef).c_str());
+    LOG_SENDRECV(("T RECV %s\n", _sprintMsg(ns, srcRef).c_str()));
 
     // get corresponding request message (if possible)
     // SRC_ADDED, SRC_REMOVED, SRC_DESC, SRC_COUNTS, etc. all have context == 0
@@ -609,15 +631,20 @@ private:
 
             // notify application (it not already done)
 
-            if (!source->_haveNotifiedAdded)
-              _listener->onStreamAdded(&source->obj);
+            if (!source->_haveNotifiedAdded) {
+              if (source->obj.key.lport == 0 && source->obj.key.rport == 0) {
+                // ignore... not sure what these are.
+              } else {
+                _listener->onStreamAdded(&source->obj);
+              }
+            }
 
             source->_haveNotifiedAdded = true;
           } else {
-            if (_logDbg) printf("E not TCP or UDP provider:%u\n", providerId);
+            LOG_DEBUG(("E not TCP or UDP provider:%u\n", providerId));
           }
         } else {
-          if (_logErrors) printf("desc before src defined\n");
+          LOG_ERROR(("desc before src defined\n"));
         }
       }
       break;
@@ -645,33 +672,42 @@ private:
             //if (_logErrors) printf("count before desc\n");
           }
         } else {
-          if (_logErrors) printf("counts before src defined\n");
+          LOG_ERROR(("counts before src defined\n"));
         }
       }
       break;
       case NSTAT_MSG_TYPE_SUCCESS:
       {
+        // the success message doesn't tell us anything.. have to lookup request to get context (done above)
+        
         if (reqMsg.msgbytes.size() > 0)
         {
           nstat_msg_hdr* reqHdr = (nstat_msg_hdr*)reqMsg.msgbytes.data();
+          
           if (reqHdr->type == NSTAT_MSG_TYPE_ADD_ALL_SRCS)
           {
-            // request descriptions for all
-            uint32_t providerId=0;
-            uint64_t reqSrcRef=0L;
-            _structHandler->getSrcRef(reqHdr, (uint32_t)reqMsg.msgbytes.size(), reqSrcRef, providerId);
-            _structHandler->writeSrcDesc(*this, providerId, (uint64_t)-1);
+            if (_wantTcp && !_isTcpAdded)
+            {
+              _isTcpAdded = true;
 
-            // add UDP if desired and not yet done
+            } else if (_wantUdp && !_isUdpAdded) {
+              _isUdpAdded = true;
+            }
 
-            if (_wantUdp && !_udpAdded) {
-              _udpAdded = true;
+            // now query src descriptions for ALL on this provider
+            
+            _queryAllSrcDesc(reqHdr, (uint32_t)reqMsg.msgbytes.size());
+
+          }
+          else if (reqHdr->type == NSTAT_MSG_TYPE_SRC_DESC)
+          {
+            if (_wantUdp && !_isUdpAdded) {
               _structHandler->writeAddAllUdpSrc(*this, _wantKernel);
             }
           }
 
         } else {
-          if (_logDbg) printf("E unhandled success response\n");
+          LOG_DEBUG(("E unhandled success response\n"));
         }
       }
       break;
@@ -683,15 +719,15 @@ private:
         if (perr->error == ENOBUFS) {
           _numDrops++;
         }
-        if (_logErrors) {
+        if (_logFlags & NTSTAT_LOGF_ERROR) {
           if (perr->error == ENOBUFS)
           {
-            printf("T error ENOBUFS - app not keeping up\n");
+            LOG_ERROR(("T error ENOBUFS - app not keeping up\n"));
           } else {
-            printf("T error code:%d (0x%x) \n", perr->error, perr->error);
+            LOG_ERROR(("T error code:%d (0x%x) \n", perr->error, perr->error));
             if (reqMsg.msgbytes.size() > 0) {
               uint64_t requestSrcRef = (reqMsg.ntsrc != 0L) ?  reqMsg.ntsrc->_srcRef : 0L;
-              printf("  for REQUEST (%s) srcRef:%llu\n", _sprintMsg((nstat_msg_hdr*)reqMsg.msgbytes.data()).c_str(), requestSrcRef);
+              LOG_ERROR(("  for REQUEST (%s) srcRef:%llu\n", _sprintMsg((nstat_msg_hdr*)reqMsg.msgbytes.data()).c_str(), requestSrcRef));
             }
           }
         }
@@ -699,7 +735,7 @@ private:
       return 0;//-1;
 
       default:
-        if (_logErrors) printf("E unknown message type:%d\n", ns->type);
+        LOG_ERROR(("E unknown message type:%d\n", ns->type));
         return -1;
     }
 
@@ -810,7 +846,7 @@ private:
           uint32_t providerId=0;
           uint64_t srcRef=0L;
           _structHandler->getSrcRef(hdr, msgLength, srcRef, providerId);
-          if (_logSendReceive) printf("T SEND %s\n", _sprintMsg(hdr, srcRef).c_str());
+          LOG_SENDRECV(("T SEND %s\n", _sprintMsg(hdr, srcRef).c_str()));
 
           _qmsgMap[hdr->context] = qmsg;
         }
@@ -828,6 +864,19 @@ private:
 
   }
 
+  //-------------------------------------------------------
+  // configure logging. Default flags == 0, no logging.
+  //-------------------------------------------------------
+  virtual void setLogging(uint8_t flags) { _logFlags = flags; }
+  
+  //-------------------------------------------------------
+  // returns the number of ENOBUFS errors received from kernel, indicating
+  // the inability to send some requested information due to full buffer.
+  // For example, attempting to send stream counts or descriptions.  The
+  // default send buffer size for kernel is 2048 bytes.
+  //-------------------------------------------------------
+  virtual uint32_t getNumDrops() { return _numDrops; }
+  
   // private data members
 
   NetworkStatisticsListener*    _listener;
@@ -853,12 +902,18 @@ private:
   bool                          _wantTcp;
   bool                          _wantUdp;
   bool                          _wantKernel;
+  
+  bool                          _isTcpAdded;
+  bool                          _isUdpAdded;
 
   uint32_t                      _updateIntervalSeconds;
 
   bool                          _recordEnabled;
   int                           _recordFd;
   uint32_t                      _numDrops;
+  
+  int                           _logFd;
+  uint8_t                       _logFlags;
 
 };
 

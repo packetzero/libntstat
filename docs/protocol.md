@@ -40,7 +40,7 @@ typedef struct nstat_msg_hdr
 
 ## Kernel Control Socket
 
-If you run the command `netstat -a` from a command-prompt, you will see something similar to the following in the output.  The **com.apple.network.statistics** name is the one we are interested in.  In this example, there are 6 active socket connections established by applications.  We can see that the receive buffer size is 8192 bytes, while the output buffer size is 2048 bytes.  My guess is that this is from the viewpoint of the application, and the kernel can write 8KB of response messages.
+If you run the command `netstat -a` from a command-prompt, you will see something similar to the following in the output.  The **com.apple.network.statistics** name is the one we are interested in.  In this example, there are 6 active socket connections established by applications.  We can see that the receive buffer size is 8192 bytes, while the output buffer size is 2048 bytes.  This is from the viewpoint of the application, so the kernel can only write 2KB of response messages.  Typically, the application receives SRC_ADDED, SRC_COUNTS, SRC_DESC, SRC_REMOVED for each source (e.g. network connection).  On Sierra and later, this is about 492 bytes for just one observed connection.  Therefore, the chances of dropping some data under heavy network activity is likely.
 ```
 Registered kernel control modules
 id       flags    pcbcount rcvbuf   sndbuf   name
