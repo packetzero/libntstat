@@ -85,6 +85,17 @@ public:
       case NSTAT_MSG_TYPE_SRC_REMOVED:
         srcRef = ((nstat_msg_src_removed*)msg)->srcref;
         break;
+      case NSTAT_MSG_TYPE_QUERY_SRC:
+        srcRef = ((nstat_msg_query_src*)msg)->srcref;
+        break;
+      case NSTAT_MSG_TYPE_GET_SRC_DESC:
+        srcRef = ((nstat_msg_get_src_description*)msg)->srcref;
+        break;
+      case NSTAT_MSG_TYPE_REM_SRC:
+        srcRef = ((nstat_msg_rem_src*)msg)->srcref;
+        break;
+      //case NSTAT_MSG_TYPE_ADD_SRC:
+      //case NSTAT_MSG_TYPE_ADD_ALL_SRCS:
       default:
         //printf("E getSrcRef not implemented for type %d\n", msg->type);
         break;

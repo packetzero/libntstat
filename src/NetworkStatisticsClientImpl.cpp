@@ -80,7 +80,7 @@ typedef struct nstat_msg_error
 
 static bool _logDbg = false;
 static bool _logTrace = false;
-static bool _logErrors = false;
+static bool _logErrors = true;
 static bool _logSendReceive = false;
 
 const int BUFSIZE = 2048;
@@ -126,7 +126,7 @@ class NetworkStatisticsClientImpl : public NetworkStatisticsClient, public MsgDe
 public:
   NetworkStatisticsClientImpl(NetworkStatisticsListener* listener): _listener(listener), _map(), _keepRunning(false),
    _fd(0), _udpAdded(false), _gotCounts(false), _seqnum(1), _qmsgMap(),
-   _wantTcp(true), _wantUdp(false), _wantKernel(false), _updateIntervalSeconds(30), _recordEnabled(false), _recordFd(0)
+   _wantTcp(true), _wantUdp(false), _wantKernel(false), _updateIntervalSeconds(30), _recordEnabled(false), _recordFd(0), _numDrops(0)
   {
     INC_QMSG();
   }
@@ -170,7 +170,7 @@ public:
 
     INC_QMSG();
   }
-  
+
   bool _inReplayMode() { return (_recordFd > 0 && _recordEnabled == false); }
 
   //------------------------------------------------------------------------
@@ -295,9 +295,8 @@ public:
 
       sendNextMsg();
 
-      while (haveIncomingMessage()) {
+      while (haveIncomingMessage())
         _readNextMessage();
-      }
     }
 
     close(_fd);
@@ -316,11 +315,36 @@ private:
   {
     nstat_msg_hdr* hdr = (nstat_msg_hdr*)qm.msgbytes.data();
 
-    if (_logSendReceive) printf("T SEND %s\n", _sprintMsg(hdr).c_str());
+    // avoid sending requests for removed sources
+    if (qm.ntsrc != 0L) {
 
-    if (_recordEnabled) RECORD(qm.msgbytes.data(), qm.msgbytes.size());
+      if ((qm.ntsrc->_tsRemoved != 0) ||
+          ((hdr->type == NSTAT_MSG_TYPE_QUERY_SRC || hdr->type == NSTAT_MSG_TYPE_GET_SRC_DESC) && qm.ntsrc->_haveDesc))
+      {
+        if (_logDbg) {
+          uint32_t providerId=0;
+          uint64_t srcRef=0L;
+          _structHandler->getSrcRef(hdr, (int)qm.msgbytes.size(), srcRef, providerId);
+          printf("D DROP %s\n",_sprintMsg(hdr, srcRef).c_str());
+        }
+        return true;
+      }
+    }
+
+    if (_logSendReceive) {
+      uint32_t providerId=0;
+      uint64_t srcRef=0L;
+      _structHandler->getSrcRef(hdr, (int)qm.msgbytes.size(), srcRef, providerId);
+      printf("T SEND %s\n", _sprintMsg(hdr, srcRef).c_str());
+    }
+
+    if (_recordEnabled) RECORD(qm.msgbytes.data(), (unsigned int)qm.msgbytes.size());
 
     ssize_t rc = write (_fd, qm.msgbytes.data(), qm.msgbytes.size());
+
+    // add to map so we can map responses to request
+
+    _qmsgMap[qm.seqnum] = qm;
 
     return (rc == qm.msgbytes.size());
   }
@@ -353,11 +377,7 @@ private:
 
       // try to write to KCQ socket
 
-      if (SEND(qm))
-      {
-        _qmsgMap[qm.seqnum] = qm;
-      }
-      else
+      if (!SEND(qm))
       {
         // error ... drop on floor
         if (_logErrors) printf("E Failed to send\n");
@@ -417,7 +437,7 @@ private:
     fd_set  fds;
     struct timeval to;
     to.tv_sec = 0;
-    to.tv_usec = 100000;
+    to.tv_usec = 50000;
     FD_ZERO (&fds);
     FD_SET (_fd, &fds);
 
@@ -496,11 +516,20 @@ private:
     return num_bytes;
   }
 
-  void RECORD(const void *src, unsigned int num_bytes)
+  //----------------------------------------------------------
+  // RECORD()
+  // persist message to file.
+  //
+  //   uint32_t timestamp
+  //   uint32_t length
+  //   char     data[length]
+  //----------------------------------------------------------
+  void RECORD(const void *src, uint32_t num_bytes)
   {
-    nstat_msg_hdr *hdr = (nstat_msg_hdr*)src;
     uint32_t now = (uint32_t)time(NULL);      // hardcode to 32-bit for platform consistency
     write(_recordFd, &now, sizeof(now));
+    write(_recordFd, &num_bytes, sizeof(num_bytes));
+
     write(_recordFd, src, num_bytes);
   }
 
@@ -551,11 +580,10 @@ private:
 
         NetstatSource* src = _resetSource(srcRef, providerId);
 
-        if (!src->_haveDesc)
-          enqueueRequestForSrcDesc(src);
-
-        break;
+//        if (!src->_haveDesc)
+//          enqueueRequestForSrcDesc(src);
       }
+      break;
       case NSTAT_MSG_TYPE_SRC_REMOVED:
       {
         NetstatSource* source = _lookupSource(srcRef);
@@ -563,9 +591,8 @@ private:
 
         if (source != 0L)
           _listener->onStreamRemoved(&source->obj);
-
-        break;
       }
+      break;
       case NSTAT_MSG_TYPE_SRC_DESC:
       {
         NetstatSource* source = _lookupSource(srcRef);
@@ -592,9 +619,8 @@ private:
         } else {
           if (_logErrors) printf("desc before src defined\n");
         }
-
-        break;
       }
+      break;
       case NSTAT_MSG_TYPE_SRC_COUNTS:
       {
         NetstatSource* source = _lookupSource(srcRef);
@@ -615,21 +641,28 @@ private:
           } else {
             // It appears that for active connections, you get counts() before description
             // ask for it now.
-            enqueueRequestForSrcDesc(source);
+            //enqueueRequestForSrcDesc(source);
             //if (_logErrors) printf("count before desc\n");
           }
         } else {
           if (_logErrors) printf("counts before src defined\n");
         }
-        break;
       }
+      break;
       case NSTAT_MSG_TYPE_SUCCESS:
+      {
         if (reqMsg.msgbytes.size() > 0)
         {
           nstat_msg_hdr* reqHdr = (nstat_msg_hdr*)reqMsg.msgbytes.data();
           if (reqHdr->type == NSTAT_MSG_TYPE_ADD_ALL_SRCS)
           {
-            // now add UDP
+            // request descriptions for all
+            uint32_t providerId=0;
+            uint64_t reqSrcRef=0L;
+            _structHandler->getSrcRef(reqHdr, (uint32_t)reqMsg.msgbytes.size(), reqSrcRef, providerId);
+            _structHandler->writeSrcDesc(*this, providerId, (uint64_t)-1);
+
+            // add UDP if desired and not yet done
 
             if (_wantUdp && !_udpAdded) {
               _udpAdded = true;
@@ -640,28 +673,34 @@ private:
         } else {
           if (_logDbg) printf("E unhandled success response\n");
         }
-
-        break;
+      }
+      break;
 
       case NSTAT_MSG_TYPE_ERROR:
       {
         // Error message
         nstat_msg_error* perr = (nstat_msg_error*)ns;
+        if (perr->error == ENOBUFS) {
+          _numDrops++;
+        }
         if (_logErrors) {
-          printf("T error code:%d (0x%x) \n", perr->error, perr->error);
-          if (reqMsg.msgbytes.size() > 0) {
-            uint64_t requestSrcRef = (reqMsg.ntsrc != 0L) ?  reqMsg.ntsrc->_srcRef : 0L;
-            printf("  for REQUEST (%s) srcRef:%llu\n", _sprintMsg((nstat_msg_hdr*)reqMsg.msgbytes.data()).c_str(), requestSrcRef);
+          if (perr->error == ENOBUFS)
+          {
+            printf("T error ENOBUFS - app not keeping up\n");
+          } else {
+            printf("T error code:%d (0x%x) \n", perr->error, perr->error);
+            if (reqMsg.msgbytes.size() > 0) {
+              uint64_t requestSrcRef = (reqMsg.ntsrc != 0L) ?  reqMsg.ntsrc->_srcRef : 0L;
+              printf("  for REQUEST (%s) srcRef:%llu\n", _sprintMsg((nstat_msg_hdr*)reqMsg.msgbytes.data()).c_str(), requestSrcRef);
+            }
           }
         }
       }
-        return 0;//-1;
-        break;
+      return 0;//-1;
 
       default:
         if (_logErrors) printf("E unknown message type:%d\n", ns->type);
         return -1;
-
     }
 
     return 0;
@@ -712,7 +751,7 @@ private:
   //----------------------------------------------------------
   virtual void runRecording(char *filename, unsigned int xnuVersion)
   {
-    uint32_t tLast = 0;
+    uint32_t lastMsgTimestamp = 0;
     _recordFd = open(filename, O_RDONLY);
     if (_recordFd <= 0) {
       printf("ERROR: unable to open %s for reading\n", filename);
@@ -723,39 +762,36 @@ private:
 
     while (true)
     {
-      vector<uint8_t> vec;
-      vec.resize(sizeof(nstat_msg_hdr));
-      nstat_msg_hdr *hdr = (nstat_msg_hdr*)vec.data();
+      uint32_t msgTimestamp;
+      uint32_t msgLength;
 
       // read timestamp
-      uint32_t now;
-      int num_bytes = (int)read(_recordFd, &now, sizeof(now));
-      if (num_bytes < sizeof(now)) {
+      int num_bytes = (int)read(_recordFd, &msgTimestamp, sizeof(msgTimestamp));
+      if (num_bytes < sizeof(msgTimestamp)) {
         // end of file?
         break;
       }
 
-      // read message header
-
-      num_bytes = (int)read(_recordFd, hdr, vec.size());
-      if (num_bytes != vec.size()) {
-        printf("WARN: partial read in recording\n");
+      num_bytes = (int)read(_recordFd, &msgLength, sizeof(msgLength));
+      if (num_bytes < sizeof(msgLength)) {
+        printf("ERROR: invalid replay header\n");
         break;
       }
 
       // sanity check
-      if (hdr->length < sizeof(nstat_msg_hdr) ||  hdr->length > 2048) {
-        printf("ERROR: invalid length in recorded message: %d\n", hdr->length);
+      if (msgLength < sizeof(nstat_msg_hdr) ||  msgLength > 2048) {
+        printf("ERROR: invalid length in recorded message: %d\n", msgLength);
         break;
       }
 
-      // now read rest of current message
-      int delta = hdr->length - num_bytes;
-      vec.resize(num_bytes + delta);
-      num_bytes = (int)read(_recordFd, (unsigned char*)vec.data() + num_bytes, delta);
+      // read message
+      vector<uint8_t> vec;
+      vec.resize(msgLength);
+      nstat_msg_hdr *hdr = (nstat_msg_hdr*)vec.data();
+      num_bytes = (int)read(_recordFd, (unsigned char*)vec.data(), msgLength);
 
-      if (num_bytes != delta) {
-        printf("WARN: partial read in recording - past header\n");
+      if (num_bytes != msgLength) {
+        printf("WARN: partial msg in recording\n");
         break;
       }
 
@@ -771,18 +807,23 @@ private:
           qmsg.seqnum = hdr->context;
           qmsg.msgbytes = vec;
           qmsg.ntsrc = 0L;      // TODO: lookup
+          uint32_t providerId=0;
+          uint64_t srcRef=0L;
+          _structHandler->getSrcRef(hdr, msgLength, srcRef, providerId);
+          if (_logSendReceive) printf("T SEND %s\n", _sprintMsg(hdr, srcRef).c_str());
+
           _qmsgMap[hdr->context] = qmsg;
-          break;
         }
+        break;
         default:
           // response
-          int secDelay = now - tLast;
-          if (secDelay > 0 && tLast != 0) sleep(secDelay);  // try to somewhat emulate natural rate
-          _handleResponseMessage((nstat_msg_hdr*)vec.data(), hdr->length);
+          int secDelay = msgTimestamp - lastMsgTimestamp;
+          if (secDelay > 0 && lastMsgTimestamp != 0) sleep(secDelay);  // try to somewhat emulate natural rate
+          _handleResponseMessage((nstat_msg_hdr*)vec.data(), msgLength);
           break;
       }
 
-      tLast = now;
+      lastMsgTimestamp = msgTimestamp;
     }
 
   }
@@ -817,6 +858,7 @@ private:
 
   bool                          _recordEnabled;
   int                           _recordFd;
+  uint32_t                      _numDrops;
 
 };
 
