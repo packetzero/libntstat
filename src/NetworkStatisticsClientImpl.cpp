@@ -69,7 +69,6 @@ typedef struct nstat_msg_error
 {
   nstat_msg_hdr   hdr;
   u_int32_t               error;  // errno error
-  u_int8_t        reserved[4];
 } nstat_msg_error;
 
 // local defs
@@ -96,7 +95,7 @@ unsigned int getXnuVersion();
 struct NetstatSource
 {
   NetstatSource(uint64_t srcRef, uint32_t providerId) : _srcRef(srcRef), _providerId(providerId), obj(),
-   _haveDesc(false), _haveNotifiedAdded(false), _tsAdded(0L), _tsRemoved(0L) {}
+   _haveDesc(false), _haveNotifiedAdded(false), _requestedCount(false), _tsAdded(0L), _tsRemoved(0L) {}
 
   uint64_t _srcRef;
   uint32_t _providerId;
@@ -104,6 +103,7 @@ struct NetstatSource
 
   bool     _haveDesc;
   bool     _haveNotifiedAdded;
+  bool     _requestedCount;
 
   time_t   _tsAdded;
   time_t   _tsRemoved;
@@ -137,7 +137,9 @@ class NetworkStatisticsClientImpl : public NetworkStatisticsClient, public MsgDe
 public:
   NetworkStatisticsClientImpl(NetworkStatisticsListener* listener): _listener(listener), _map(), _keepRunning(false),
    _fd(0), _seqnum(1), _qmsgMap(), _state(STATE_START),
-   _wantTcp(true), _wantUdp(false), _wantKernel(false), _updateIntervalSeconds(30), _recordEnabled(false), _recordFd(0), _numDrops(0), _numErrors(0),_logFlags(0)
+   _wantTcp(true), _wantUdp(false), _wantKernel(false), _updateIntervalSeconds(30),
+   _recordEnabled(false), _recordFd(0), _numDrops(0), _numErrors(0),_logFlags(0),
+   _isRequestAllDescEnabled(false), _mapWaitingForDesc(), _mapWaitingForCount()
   {
     INC_QMSG();
   }
@@ -299,7 +301,7 @@ public:
 
       if (_updateIntervalSeconds > 0 && ((now - tLastUpdate) >= _updateIntervalSeconds)) {
         tLastUpdate = now;
-        _queryAllCounts();
+        _queryAllCounts();  // TODO: only query individual counts.
       }
 
       sendNextMsg();
@@ -323,22 +325,6 @@ private:
   bool SEND(QMsg &qm)
   {
     nstat_msg_hdr* hdr = (nstat_msg_hdr*)qm.msgbytes.data();
-
-    // avoid sending requests for removed sources
-    if (qm.ntsrc != 0L) {
-
-      if ((qm.ntsrc->_tsRemoved != 0) ||
-          ((hdr->type == NSTAT_MSG_TYPE_QUERY_SRC || hdr->type == NSTAT_MSG_TYPE_GET_SRC_DESC) && qm.ntsrc->_haveDesc))
-      {
-        if (_logFlags & NTSTAT_LOGF_DROPS) {
-          uint32_t providerId=0;
-          uint64_t srcRef=0L;
-          _structHandler->getSrcRef(hdr, (int)qm.msgbytes.size(), srcRef, providerId);
-          LOG_DROPS(("D DROP %s\n",_sprintMsg(hdr, srcRef).c_str()));
-        }
-        return true;
-      }
-    }
 
     if (_logFlags & NTSTAT_LOGF_SENDRECV) {
       uint32_t providerId=0;
@@ -365,24 +351,23 @@ private:
   //----------------------------------------------------------
   void sendNextMsg()
   {
+    // no message waiting, do we have any sources that need descriptions?
+    
+    if (_outq.empty() && !_mapWaitingForDesc.empty())
+    {
+      auto it = _mapWaitingForDesc.begin();
+      NetstatSource* source = it->second;
+      _structHandler->writeSrcDesc(*this, source->_providerId, source->_srcRef);
+      _mapWaitingForDesc.erase(it++);
+    }
+
+    // send if we have
+    
     while (!_outq.empty())
     {
       // get ref to first message in outq
 
       QMsg &qm = *_outq.begin();
-
-      nstat_msg_hdr* hdr = (nstat_msg_hdr*)qm.msgbytes.data();
-
-      // avoid sending requests for things we already have
-
-      if (hdr->type == NSTAT_MSG_TYPE_GET_SRC_DESC)
-      {
-        if (0L != qm.ntsrc && qm.ntsrc->_haveDesc) {
-          // don't need to send this.  Any reason to request again?
-          _outq.erase(_outq.begin());
-          continue;
-        }
-      }
 
       // try to write to KCQ socket
 
@@ -395,7 +380,7 @@ private:
       // pop off message sent
       _outq.erase(_outq.begin());
 
-      break;
+      return;
     }
 
   }
@@ -505,7 +490,7 @@ private:
 
     if (hdr == 0L) return "NULL";
 
-    sprintf(tmp, "%c %4llu type:%s(%d) len:%d srcRef:%llu", msg_dir(hdr->type), hdr->context, msg_name(hdr->type).c_str(), hdr->type, hdr->length, srcRef);
+    sprintf(tmp, "%c %4llu type:%s(%d) hdr->len:%d srcRef:%llu", msg_dir(hdr->type), hdr->context, msg_name(hdr->type).c_str(), hdr->type, hdr->length, srcRef);
 
     return string(tmp);
   }
@@ -582,7 +567,7 @@ private:
 
     if (num_bytes < sizeof(nstat_msg_error))
     {
-      LOG_ERROR(("E error struct size mismatch"));
+      LOG_ERROR(("E error struct size mismatch\n"));
       return EFAULT;
     }
 
@@ -687,7 +672,12 @@ private:
       {
         if (isSuccessResponse || NOT_FATAL(err))
         {
-          return _enterStateRequestTcpSrcDesc(msgHdr, num_bytes, reqMsg);
+          if (_isRequestAllDescEnabled)
+            return _enterStateRequestTcpSrcDesc(msgHdr, num_bytes, reqMsg);
+          else if (_wantUdp)
+            return _enterStateRequestUdpSrc();
+          else
+            return _enterRunningState(msgHdr, num_bytes, reqMsg);
         }
         else
         {
@@ -714,7 +704,10 @@ private:
       {
         if (isSuccessResponse || NOT_FATAL(err))
         {
-          return _enterStateRequestUdpSrcDesc(msgHdr, num_bytes, reqMsg);
+          if (_isRequestAllDescEnabled)
+            return _enterStateRequestUdpSrcDesc(msgHdr, num_bytes, reqMsg);
+          else
+            return _enterRunningState(msgHdr, num_bytes, reqMsg);
         }
         else
         {
@@ -732,6 +725,19 @@ private:
     }
     
     return 0;
+  }
+
+  //----------------------------------------------------------
+  //
+  //----------------------------------------------------------
+  void addToWaitingForDescQueue(NetstatSource* src)
+  {
+    _mapWaitingForDesc[src->_srcRef] = src;
+  }
+  
+  void removeFromWaitingForDescQueue(NetstatSource* src)
+  {
+    _mapWaitingForDesc.erase(src->_srcRef); // TODO: exception if not found?
   }
   
   //----------------------------------------------------------
@@ -772,9 +778,9 @@ private:
         // SRC_ADDED are typically sent (resent) right before the SRC_REMOVED
 
         NetstatSource* src = _resetSource(srcRef, providerId);
+        if (!src->_haveDesc)
+          addToWaitingForDescQueue(src);
 
-//        if (!src->_haveDesc)
-//          enqueueRequestForSrcDesc(src);
       }
       break;
       case NSTAT_MSG_TYPE_SRC_REMOVED:
@@ -783,6 +789,7 @@ private:
 
         if (source != 0L) {
           _markSourceForRemove(source);
+          removeFromWaitingForDescQueue(source);
           _listener->onStreamRemoved(&source->obj);
         }
       }
@@ -793,6 +800,7 @@ private:
 
         if (source != 0L)
         {
+          removeFromWaitingForDescQueue(source);
           if (_structHandler->readSrcDesc(ns, num_bytes, &source->obj))
           {
             source->_haveDesc = true;
@@ -805,7 +813,7 @@ private:
 
             if (!source->_haveNotifiedAdded) {
               if (source->obj.key.lport == 0 && source->obj.key.rport == 0) {
-                // ignore... not sure what these are.
+                // ignore... TODO: not sure what these are.
               } else {
                 _listener->onStreamAdded(&source->obj);
               }
@@ -827,15 +835,10 @@ private:
 
           _structHandler->readCounts(ns, num_bytes, source->obj.stats);
 
-          if (source->_haveDesc) {
+          if (source->_haveDesc && source->_requestedCount) {
 
-            // only notify of stat updates for persistent streams with traffic
-
-            time_t now = time(NULL);
-            if (source->_tsRemoved == 0 && (now - source->_tsAdded) > 5) {
-              if (source->obj.stats.rxpackets > 0 || source->obj.stats.txpackets > 0)
+            if (source->obj.stats.rxpackets > 0 || source->obj.stats.txpackets > 0)
                 _listener->onStreamStatsUpdate(&source->obj);
-            }
 
           } else {
             // It appears that for active connections, you get counts() before description
@@ -906,7 +909,7 @@ private:
     char filename[64];
     sprintf(filename, "ntstat-xnu-%d.bin", getXnuVersion());
 
-    _recordFd = open(filename, O_CREAT | O_WRONLY | O_SYNC, 0664);
+    _recordFd = open(filename, O_CREAT | O_TRUNC | O_WRONLY | O_SYNC, 0664);
     if (_recordFd <= 0) {
       printf("ERROR: unable to open %s for writing\n", filename);
       return;
@@ -929,6 +932,11 @@ private:
 
     _loadStructHandler(xnuVersion);
 
+    // By default, use running state.  We try to detect based on first message below
+
+    _state = STATE_RUNNING;
+
+    int replayMsgCount = 0;
     while (true)
     {
       uint32_t msgTimestamp;
@@ -963,6 +971,12 @@ private:
         printf("WARN: partial msg in recording\n");
         break;
       }
+
+      // if first message in file is an ADD_ALL, then assume it contains the start of a session
+
+      if (replayMsgCount == 0 && hdr->type == NSTAT_MSG_TYPE_ADD_ALL_SRCS) _state = STATE_START;
+
+      replayMsgCount++;
 
       switch(hdr->type) {
         case NSTAT_MSG_TYPE_ADD_SRC:
@@ -1043,6 +1057,10 @@ private:
   
   int                           _logFd;
   uint8_t                       _logFlags;
+  
+  bool                          _isRequestAllDescEnabled;
+  map<uint64_t, NetstatSource*> _mapWaitingForDesc;
+  map<uint64_t, NetstatSource*> _mapWaitingForCount;
 
 };
 
