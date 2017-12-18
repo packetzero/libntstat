@@ -58,14 +58,15 @@ public:
   // xnu-3789 is first time we see split _KERNEL and _USERLAND
 
   virtual void writeAddAllTcpSrc(MsgDest &dest, bool wantKernel) {
-    if (wantKernel)
+ //   if (wantKernel)
       writeAddAllSrc(dest, NSTAT_PROVIDER_TCP_KERNEL);
-    writeAddAllSrc(dest, NSTAT_PROVIDER_TCP_USERLAND);
+ //   writeAddAllSrc(dest, NSTAT_PROVIDER_TCP_USERLAND);      // this just sends repeat of all KERNEL srcs
   }
 
   virtual void writeAddAllUdpSrc(MsgDest &dest, bool wantKernel) {
-    if (wantKernel) writeAddAllSrc(dest, NSTAT_PROVIDER_UDP_KERNEL);
-    writeAddAllSrc(dest, NSTAT_PROVIDER_UDP_USERLAND);
+    //if (wantKernel)
+      writeAddAllSrc(dest, NSTAT_PROVIDER_UDP_KERNEL);
+    //writeAddAllSrc(dest, NSTAT_PROVIDER_UDP_USERLAND);
   }
 
 

@@ -118,15 +118,16 @@ struct QMsg
   NetstatSource*   ntsrc;
 };
 
-enum {
+typedef enum {
   STATE_START
   ,STATE_REQUEST_TCP_SRC
   ,STATE_REQUEST_TCP_SRC_DESC
   ,STATE_REQUEST_UDP_SRC
   ,STATE_REQUEST_UDP_SRC_DESC
-  ,STATE_NORMAL
-  ,STATE_REQUEST_COUNT_UPDATE
-};
+  ,STATE_RUNNING
+} state_t;
+
+#define NOT_FATAL(errno) (ENOBUFS == (errno) || 0 == (errno))
 
 /*
  * Implementation of NetworkStatisticsClient
@@ -135,8 +136,8 @@ class NetworkStatisticsClientImpl : public NetworkStatisticsClient, public MsgDe
 {
 public:
   NetworkStatisticsClientImpl(NetworkStatisticsListener* listener): _listener(listener), _map(), _keepRunning(false),
-   _fd(0), _udpAdded(false), _gotCounts(false), _seqnum(1), _qmsgMap(),
-   _wantTcp(true), _wantUdp(false), _wantKernel(false), _updateIntervalSeconds(30), _recordEnabled(false), _recordFd(0), _numDrops(0), _logFlags(0)
+   _fd(0), _seqnum(1), _qmsgMap(), _state(STATE_START),
+   _wantTcp(true), _wantUdp(false), _wantKernel(false), _updateIntervalSeconds(30), _recordEnabled(false), _recordFd(0), _numDrops(0), _numErrors(0),_logFlags(0)
   {
     INC_QMSG();
   }
@@ -281,10 +282,8 @@ public:
 
     // need to start by subscribing to either UDP or TCP
 
-    if (!_wantTcp)
-      _structHandler->writeAddAllUdpSrc(*this, _wantKernel);
-    else
-      _structHandler->writeAddAllTcpSrc(*this, _wantKernel);
+    if (_wantTcp) _enterStateRequestTcpSrc();
+    else _enterStateRequestUdpSrc();
 
     time_t tLastCleanup = time(NULL);
     time_t tLastUpdate = time(NULL) - 5;
@@ -571,6 +570,171 @@ private:
   }
 
   //----------------------------------------------------------
+  // returns errno code and logs if enabled
+  //----------------------------------------------------------
+  int _getAndLogError(nstat_msg_hdr* msgHdr, int num_bytes, QMsg &reqMsg)
+  {
+    nstat_msg_error* perr = (nstat_msg_error*)msgHdr;
+    
+    // consider special case errors
+
+    _numErrors++;
+
+    if (num_bytes < sizeof(nstat_msg_error))
+    {
+      LOG_ERROR(("E error struct size mismatch"));
+      return EFAULT;
+    }
+
+    if (perr->error == ENOBUFS) {
+      _numDrops++;
+    }
+
+    // log if desired
+
+    if (_logFlags & NTSTAT_LOGF_ERROR) {
+      if (perr->error == ENOBUFS)
+      {
+        LOG_ERROR(("T error ENOBUFS - app not keeping up\n"));
+      } else {
+        LOG_ERROR(("T error code:%d (0x%x) \n", perr->error, perr->error));
+        if (reqMsg.msgbytes.size() > 0) {
+          uint64_t requestSrcRef = (reqMsg.ntsrc != 0L) ?  reqMsg.ntsrc->_srcRef : 0L;
+          LOG_ERROR(("  for REQUEST (%s) srcRef:%llu\n", _sprintMsg((nstat_msg_hdr*)reqMsg.msgbytes.data()).c_str(), requestSrcRef));
+        }
+      }
+    }
+
+    return perr->error;
+  }
+
+  //----------------------------------------------------------
+  // _enterStateRequestTcpSrcDesc
+  // @returns 0
+  //----------------------------------------------------------
+  int _enterStateRequestTcpSrcDesc(nstat_msg_hdr* reqHdr, int num_bytes, QMsg &reqMsg)
+  {
+    _state = STATE_REQUEST_TCP_SRC_DESC;
+
+    _queryAllSrcDesc(reqHdr, (uint32_t)reqMsg.msgbytes.size());
+
+    return 0;
+  }
+
+  //----------------------------------------------------------
+  // _enterStateRequestUdpSrcDesc
+  // @returns 0
+  //----------------------------------------------------------
+  int _enterStateRequestUdpSrcDesc(nstat_msg_hdr* reqHdr, int num_bytes, QMsg &reqMsg)
+  {
+    _state = STATE_REQUEST_UDP_SRC_DESC;
+
+    _queryAllSrcDesc(reqHdr, (uint32_t)reqMsg.msgbytes.size());
+    
+    return 0;
+  }
+
+  //----------------------------------------------------------
+  // _enterStateRequestUdpSrc
+  // @returns 0
+  //----------------------------------------------------------
+  int _enterStateRequestUdpSrc()
+  {
+    _state = STATE_REQUEST_UDP_SRC;
+
+    _structHandler->writeAddAllUdpSrc(*this, _wantKernel);
+
+    return 0;
+  }
+
+  //----------------------------------------------------------
+  // _enterStateRequestTcpSrc
+  // @returns 0
+  //----------------------------------------------------------
+  int _enterStateRequestTcpSrc()
+  {
+    _state = STATE_REQUEST_TCP_SRC;
+    
+    _structHandler->writeAddAllTcpSrc(*this, _wantKernel);
+    
+    return 0;
+  }
+  
+  //----------------------------------------------------------
+  // _enterRunningState
+  // The "running" state is mostly passive... listening to events.
+  // We can get here even if there was an error on initialization.
+  // @returns 0
+  //----------------------------------------------------------
+  int _enterRunningState(nstat_msg_hdr* reqHdr, int num_bytes, QMsg &reqMsg)
+  {
+    _state = STATE_RUNNING;
+    return 0;
+  }
+  
+  //----------------------------------------------------------
+  // handleState
+  //----------------------------------------------------------
+  int _handleState(nstat_msg_hdr* msgHdr, int num_bytes, QMsg &reqMsg)
+  {
+    bool isSuccessResponse = (msgHdr->type == NSTAT_MSG_TYPE_SUCCESS && reqMsg.msgbytes.size() > 0);
+
+    int err = (msgHdr->type == NSTAT_MSG_TYPE_ERROR ? _getAndLogError(msgHdr, num_bytes, reqMsg) : 0);
+
+    switch(_state)
+    {
+      case STATE_REQUEST_TCP_SRC:
+      {
+        if (isSuccessResponse || NOT_FATAL(err))
+        {
+          return _enterStateRequestTcpSrcDesc(msgHdr, num_bytes, reqMsg);
+        }
+        else
+        {
+          return _enterRunningState(msgHdr, num_bytes, reqMsg);
+        }
+        break;
+      }
+      case STATE_REQUEST_TCP_SRC_DESC:
+      {
+        if (isSuccessResponse || NOT_FATAL(err))
+        {
+          if (_wantUdp)
+            return _enterStateRequestUdpSrc();
+          else
+            return _enterRunningState(msgHdr, num_bytes, reqMsg);
+        }
+        else
+        {
+          return _enterRunningState(msgHdr, num_bytes, reqMsg);
+        }
+        break;
+      }
+      case STATE_REQUEST_UDP_SRC:
+      {
+        if (isSuccessResponse || NOT_FATAL(err))
+        {
+          return _enterStateRequestUdpSrcDesc(msgHdr, num_bytes, reqMsg);
+        }
+        else
+        {
+          return _enterRunningState(msgHdr, num_bytes, reqMsg);
+        }
+        break;
+      }
+      case STATE_REQUEST_UDP_SRC_DESC:
+        return _enterRunningState(msgHdr, num_bytes, reqMsg);
+        break;
+      default:
+        // unexpected.  Enter passive listening state ... _getAndLogError() above logs error
+        return _enterRunningState(msgHdr, num_bytes, reqMsg);
+        break;
+    }
+    
+    return 0;
+  }
+  
+  //----------------------------------------------------------
   // _handleResponseMessage()
   // Separated from _socketRead for testing purposes.
   //----------------------------------------------------------
@@ -592,6 +756,13 @@ private:
       _qmsgMap.erase(fit);
     }
 
+    // until we are in RUNNING state, handle changes
+
+    if (_state != STATE_RUNNING && (ns->type == NSTAT_MSG_TYPE_ERROR || ns->type == NSTAT_MSG_TYPE_SUCCESS))
+    {
+      return _handleState(ns, num_bytes, reqMsg);
+    }
+    
     switch (ns->type)
     {
 
@@ -609,10 +780,11 @@ private:
       case NSTAT_MSG_TYPE_SRC_REMOVED:
       {
         NetstatSource* source = _lookupSource(srcRef);
-        _markSourceForRemove(source);
 
-        if (source != 0L)
+        if (source != 0L) {
+          _markSourceForRemove(source);
           _listener->onStreamRemoved(&source->obj);
+        }
       }
       break;
       case NSTAT_MSG_TYPE_SRC_DESC:
@@ -682,29 +854,7 @@ private:
         
         if (reqMsg.msgbytes.size() > 0)
         {
-          nstat_msg_hdr* reqHdr = (nstat_msg_hdr*)reqMsg.msgbytes.data();
-          
-          if (reqHdr->type == NSTAT_MSG_TYPE_ADD_ALL_SRCS)
-          {
-            if (_wantTcp && !_isTcpAdded)
-            {
-              _isTcpAdded = true;
-
-            } else if (_wantUdp && !_isUdpAdded) {
-              _isUdpAdded = true;
-            }
-
-            // now query src descriptions for ALL on this provider
-            
-            _queryAllSrcDesc(reqHdr, (uint32_t)reqMsg.msgbytes.size());
-
-          }
-          else if (reqHdr->type == NSTAT_MSG_TYPE_SRC_DESC)
-          {
-            if (_wantUdp && !_isUdpAdded) {
-              _structHandler->writeAddAllUdpSrc(*this, _wantKernel);
-            }
-          }
+          //nstat_msg_hdr* reqHdr = (nstat_msg_hdr*)reqMsg.msgbytes.data();
 
         } else {
           LOG_DEBUG(("E unhandled success response\n"));
@@ -714,26 +864,9 @@ private:
 
       case NSTAT_MSG_TYPE_ERROR:
       {
-        // Error message
-        nstat_msg_error* perr = (nstat_msg_error*)ns;
-        if (perr->error == ENOBUFS) {
-          _numDrops++;
-        }
-        if (_logFlags & NTSTAT_LOGF_ERROR) {
-          if (perr->error == ENOBUFS)
-          {
-            LOG_ERROR(("T error ENOBUFS - app not keeping up\n"));
-          } else {
-            LOG_ERROR(("T error code:%d (0x%x) \n", perr->error, perr->error));
-            if (reqMsg.msgbytes.size() > 0) {
-              uint64_t requestSrcRef = (reqMsg.ntsrc != 0L) ?  reqMsg.ntsrc->_srcRef : 0L;
-              LOG_ERROR(("  for REQUEST (%s) srcRef:%llu\n", _sprintMsg((nstat_msg_hdr*)reqMsg.msgbytes.data()).c_str(), requestSrcRef));
-            }
-          }
-        }
+        int err = _getAndLogError(ns, num_bytes, reqMsg);
+        return (NOT_FATAL(err) ? 0 : -1);
       }
-      return 0;//-1;
-
       default:
         LOG_ERROR(("E unknown message type:%d\n", ns->type));
         return -1;
@@ -889,9 +1022,7 @@ private:
 
   NTStatKernelStructHandler*    _structHandler;
 
-  bool                          _udpAdded;
-
-  bool                          _gotCounts;     // have request counts
+  state_t                       _state;
 
   vector<QMsg>                  _outq;  // messages that need to be sent
 
@@ -903,14 +1034,12 @@ private:
   bool                          _wantUdp;
   bool                          _wantKernel;
   
-  bool                          _isTcpAdded;
-  bool                          _isUdpAdded;
-
   uint32_t                      _updateIntervalSeconds;
 
   bool                          _recordEnabled;
   int                           _recordFd;
   uint32_t                      _numDrops;
+  uint32_t                      _numErrors;
   
   int                           _logFd;
   uint8_t                       _logFlags;
