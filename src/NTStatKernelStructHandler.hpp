@@ -53,9 +53,9 @@ public:
   virtual void writeAddAllUdpSrc(MsgDest &dest, bool wantKernel) = 0;
 
   /*
-   * write NSTAT_MSG_TYPE_QUERY_SRC for all
+   * write NSTAT_MSG_TYPE_QUERY_SRC
    */
-  virtual void writeQueryAllSrc(MsgDest &dest) = 0;
+  virtual void writeQuerySrc(MsgDest &dest, uint64_t srcRef) = 0;
 
   /*
    * Extract from msg and populate srcRef and providerId (if in message).

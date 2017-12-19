@@ -24,7 +24,7 @@ public:
 
     NTSTAT_MSG_HDR(msg, dest, NSTAT_MSG_TYPE_GET_SRC_DESC);
 
-    msg.srcref = (uint32_t)srcRef;
+    msg.srcref = (nstat_src_ref_t)srcRef;
 
     dest.send(&msg.hdr, sizeof(msg));
   }
@@ -32,12 +32,13 @@ public:
   //--------------------------------------------------------------------
   // write QUERY_SRC message to dest
   //--------------------------------------------------------------------
-  virtual void writeQueryAllSrc(MsgDest &dest) {
+  virtual void writeQuerySrc(MsgDest &dest, uint64_t srcRef)
+  {
     nstat_msg_query_src_req msg = nstat_msg_query_src_req();
 
     NTSTAT_MSG_HDR(msg, dest, NSTAT_MSG_TYPE_QUERY_SRC);
 
-    msg.srcref= NSTAT_SRC_REF_ALL;
+    msg.srcref= (nstat_src_ref_t)srcRef;
 
     dest.send(&msg.hdr, sizeof(msg));
   }

@@ -95,7 +95,7 @@ unsigned int getXnuVersion();
 struct NetstatSource
 {
   NetstatSource(uint64_t srcRef, uint32_t providerId) : _srcRef(srcRef), _providerId(providerId), obj(),
-   _haveDesc(false), _haveNotifiedAdded(false), _requestedCount(false), _tsAdded(0L), _tsRemoved(0L) {}
+   _haveDesc(false), _haveNotifiedAdded(false), _requestedCount(false), _tsAdded(0L), _tsRemoved(0L), _tsLastUpdate(0L) {}
 
   uint64_t _srcRef;
   uint32_t _providerId;
@@ -107,6 +107,7 @@ struct NetstatSource
 
   time_t   _tsAdded;
   time_t   _tsRemoved;
+  time_t   _tsLastUpdate;
 };
 
 // tracking of messages
@@ -154,6 +155,10 @@ public:
 
   virtual void configure(bool wantTcp, bool wantUdp, bool wantKernel, uint32_t updateIntervalSeconds) {
     _wantTcp = wantTcp; _wantUdp = wantUdp; _wantKernel = wantKernel; _updateIntervalSeconds = updateIntervalSeconds;
+    if (_updateIntervalSeconds < 30) {
+      printf("E Invalid updateIntervalSeconds (%d).  Using 30\n", updateIntervalSeconds);
+      _updateIntervalSeconds = 30;
+    }
   }
 
   // MsgDest::seqnum
@@ -267,6 +272,35 @@ public:
     else
       _structHandler = NewNTStatKernel2422();
   }
+  
+  //----------------------------------------------------------
+  // Go through list of sources and request counts (stats)
+  // for those who it's been at least 15 seconds since added
+  // or updated.  NOTE: this gets called from run() after
+  // _updateIntervalSeconds.
+  //----------------------------------------------------------
+  void _updateWaitForCountsQueue(time_t now)
+  {
+    for (auto it = _map.begin();it != _map.end(); it++)
+    {
+      NetstatSource* source = it->second;
+      
+      if (source->_tsRemoved != 0) continue;
+      
+      if (IS_LISTEN_PORT(&source->obj)) continue;
+
+      time_t delta = 0;
+      if (0L == source->_tsLastUpdate)
+        delta = now - source->_tsAdded;
+      else
+        delta = now - source->_tsLastUpdate;
+
+      if (delta >= 15) {
+        source->_requestedCount = true;
+        _mapWaitingForCount[source->_srcRef] = source;
+      }
+    }
+  }
 
   //----------------------------------------------------------
   // run
@@ -288,7 +322,7 @@ public:
     else _enterStateRequestUdpSrc();
 
     time_t tLastCleanup = time(NULL);
-    time_t tLastUpdate = time(NULL) - 5;
+    time_t tLastUpdate = time(NULL);
 
     while (_keepRunning)
     {
@@ -301,7 +335,8 @@ public:
 
       if (_updateIntervalSeconds > 0 && ((now - tLastUpdate) >= _updateIntervalSeconds)) {
         tLastUpdate = now;
-        _queryAllCounts();  // TODO: only query individual counts.
+        
+        _updateWaitForCountsQueue(now);
       }
 
       sendNextMsg();
@@ -361,6 +396,21 @@ private:
       _mapWaitingForDesc.erase(it++);
     }
 
+    // no message waiting, do we have any sources that need count updates?
+    
+    if (_outq.empty() && !_mapWaitingForCount.empty())
+    {
+      auto it = _mapWaitingForCount.begin();
+      NetstatSource* source = it->second;
+
+      // make sure we still want this data
+
+      if (source->_tsRemoved == 0 && source->_requestedCount) {
+        _structHandler->writeQuerySrc(*this, source->_srcRef);
+      }
+      _mapWaitingForCount.erase(it++);
+    }
+    
     // send if we have
     
     while (!_outq.empty())
@@ -835,18 +885,22 @@ private:
 
           _structHandler->readCounts(ns, num_bytes, source->obj.stats);
 
-          if (source->_haveDesc && source->_requestedCount) {
+          if (source->_haveDesc) {
 
-            if (source->obj.stats.rxpackets > 0 || source->obj.stats.txpackets > 0)
+            if (source->_requestedCount && (source->obj.stats.rxpackets > 0 || source->obj.stats.txpackets > 0))
                 _listener->onStreamStatsUpdate(&source->obj);
 
           } else {
-            // It appears that for active connections, you get counts() before description
-            // ask for it now.
-            //enqueueRequestForSrcDesc(source);
-            //if (_logErrors) printf("count before desc\n");
+            // typically we receive ADDED,COUNTS,DESC,REMOVED
+            // So if we don't have DESC, we can't report anything yet.
           }
-        } else {
+
+          // update count state
+
+          source->_tsLastUpdate = time(NULL);
+          source->_requestedCount = false;
+        }
+        else {
           LOG_ERROR(("counts before src defined\n"));
         }
       }
@@ -876,11 +930,6 @@ private:
     }
 
     return 0;
-  }
-
-  void _queryAllCounts()
-  {
-    _structHandler->writeQueryAllSrc(*this);
   }
 
   void enqueueRequestForSrcDesc(NetstatSource* source)
