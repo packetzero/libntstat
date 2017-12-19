@@ -9,11 +9,20 @@
 
 #include <string.h>
 #include <vector>
+#include <string>
 using namespace std;
 
 class NTStatKernel4570 : public NTStatKernelStructHandler
 {
 public:
+
+  virtual bool isProviderTcp(uint64_t providerId){
+    return (NSTAT_PROVIDER_TCP_KERNEL == providerId)||(NSTAT_PROVIDER_TCP_USERLAND);}
+
+  virtual bool isProviderUdp(uint64_t providerId) {
+    return (NSTAT_PROVIDER_UDP_KERNEL == providerId)||(NSTAT_PROVIDER_UDP_USERLAND);}
+
+  virtual bool isProviderInterface(uint64_t providerId) { return NSTAT_PROVIDER_IFNET == providerId; }
 
   //--------------------------------------------------------------------
   // write GET_SRC_DESC message to dest
@@ -59,18 +68,20 @@ public:
 
   // xnu-3789 is first time we see split _KERNEL and _USERLAND
 
-  virtual void writeAddAllTcpSrc(MsgDest &dest, bool wantKernel) {
-    //if (wantKernel)
+  virtual void writeAddAllTcpSrc(MsgDest &dest) {
       writeAddAllSrc(dest, NSTAT_PROVIDER_TCP_KERNEL);
     //writeAddAllSrc(dest, NSTAT_PROVIDER_TCP_USERLAND);
   }
 
-  virtual void writeAddAllUdpSrc(MsgDest &dest, bool wantKernel) {
-    //if (wantKernel)
+  virtual void writeAddAllUdpSrc(MsgDest &dest) {
       writeAddAllSrc(dest, NSTAT_PROVIDER_UDP_KERNEL);
     //writeAddAllSrc(dest, NSTAT_PROVIDER_UDP_USERLAND);
   }
 
+  virtual void writeAddAllInterfaces(MsgDest &dest) {
+    writeAddAllSrc(dest, NSTAT_PROVIDER_IFNET);
+  }
+  
 
   //--------------------------------------------------------------------
   // extract srcRef, providerId (if possible) from message
@@ -114,6 +125,25 @@ public:
     }
     return true;
   }
+
+  
+  //--------------------------------------------------------------------
+  // populate dest with message ifnet data
+  //--------------------------------------------------------------------
+  /*
+  virtual bool readSrcDesc(nstat_msg_hdr* hdr, int structlen, NTStatInterface* dest )
+  {
+    nstat_msg_src_description *msg = (nstat_msg_src_description*)hdr;
+    if (msg->provider != NSTAT_PROVIDER_IFNET) return false;
+    
+    nstat_ifnet_descriptor* ifnet = (nstat_ifnet_descriptor*)msg->data;
+    dest->name = string(ifnet->name);
+    dest->description = string(ifnet->description);
+    dest->ifindex = ifnet->ifindex;
+    dest->type = ifnet->type;
+    
+    return false;
+  }*/
 
   //--------------------------------------------------------------------
   // TCP: populate dest with message data

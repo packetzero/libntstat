@@ -121,10 +121,9 @@ struct QMsg
 
 typedef enum {
   STATE_START
+  ,STATE_REQUEST_IFNET_SRC
   ,STATE_REQUEST_TCP_SRC
-  ,STATE_REQUEST_TCP_SRC_DESC
   ,STATE_REQUEST_UDP_SRC
-  ,STATE_REQUEST_UDP_SRC_DESC
   ,STATE_RUNNING
 } state_t;
 
@@ -140,7 +139,7 @@ public:
    _fd(0), _seqnum(1), _qmsgMap(), _state(STATE_START),
    _wantTcp(true), _wantUdp(false), _wantKernel(false), _updateIntervalSeconds(30),
    _recordEnabled(false), _recordFd(0), _numDrops(0), _numErrors(0),_logFlags(0),
-   _isRequestAllDescEnabled(false), _mapWaitingForDesc(), _mapWaitingForCount()
+   _mapWaitingForDesc(), _mapWaitingForCount()
   {
     INC_QMSG();
   }
@@ -153,8 +152,8 @@ public:
     _workingMsg.ntsrc = src;
   }
 
-  virtual void configure(bool wantTcp, bool wantUdp, bool wantKernel, uint32_t updateIntervalSeconds) {
-    _wantTcp = wantTcp; _wantUdp = wantUdp; _wantKernel = wantKernel; _updateIntervalSeconds = updateIntervalSeconds;
+  virtual void configure(bool wantTcp, bool wantUdp, uint32_t updateIntervalSeconds) {
+    _wantTcp = wantTcp; _wantUdp = wantUdp; _updateIntervalSeconds = updateIntervalSeconds;
     if (_updateIntervalSeconds < 30) {
       printf("E Invalid updateIntervalSeconds (%d).  Using 30\n", updateIntervalSeconds);
       _updateIntervalSeconds = 30;
@@ -288,6 +287,8 @@ public:
       if (source->_tsRemoved != 0) continue;
       
       if (IS_LISTEN_PORT(&source->obj)) continue;
+      
+      if (source->obj.key.lport == 0 && source->obj.key.rport == 0) continue; // TODO: what are these?
 
       time_t delta = 0;
       if (0L == source->_tsLastUpdate)
@@ -630,6 +631,7 @@ private:
     if (_logFlags & NTSTAT_LOGF_ERROR) {
       if (perr->error == ENOBUFS)
       {
+        LOG_DROPS(("  ENOBUFS drop\n"));
         LOG_ERROR(("T error ENOBUFS - app not keeping up\n"));
       } else {
         LOG_ERROR(("T error code:%d (0x%x) \n", perr->error, perr->error));
@@ -644,32 +646,6 @@ private:
   }
 
   //----------------------------------------------------------
-  // _enterStateRequestTcpSrcDesc
-  // @returns 0
-  //----------------------------------------------------------
-  int _enterStateRequestTcpSrcDesc(nstat_msg_hdr* reqHdr, int num_bytes, QMsg &reqMsg)
-  {
-    _state = STATE_REQUEST_TCP_SRC_DESC;
-
-    _queryAllSrcDesc(reqHdr, (uint32_t)reqMsg.msgbytes.size());
-
-    return 0;
-  }
-
-  //----------------------------------------------------------
-  // _enterStateRequestUdpSrcDesc
-  // @returns 0
-  //----------------------------------------------------------
-  int _enterStateRequestUdpSrcDesc(nstat_msg_hdr* reqHdr, int num_bytes, QMsg &reqMsg)
-  {
-    _state = STATE_REQUEST_UDP_SRC_DESC;
-
-    _queryAllSrcDesc(reqHdr, (uint32_t)reqMsg.msgbytes.size());
-    
-    return 0;
-  }
-
-  //----------------------------------------------------------
   // _enterStateRequestUdpSrc
   // @returns 0
   //----------------------------------------------------------
@@ -677,7 +653,7 @@ private:
   {
     _state = STATE_REQUEST_UDP_SRC;
 
-    _structHandler->writeAddAllUdpSrc(*this, _wantKernel);
+    _structHandler->writeAddAllUdpSrc(*this);
 
     return 0;
   }
@@ -690,10 +666,11 @@ private:
   {
     _state = STATE_REQUEST_TCP_SRC;
     
-    _structHandler->writeAddAllTcpSrc(*this, _wantKernel);
+    _structHandler->writeAddAllTcpSrc(*this);
     
     return 0;
   }
+
   
   //----------------------------------------------------------
   // _enterRunningState
@@ -718,24 +695,13 @@ private:
 
     switch(_state)
     {
-      case STATE_REQUEST_TCP_SRC:
+      case STATE_REQUEST_IFNET_SRC:
       {
-        if (isSuccessResponse || NOT_FATAL(err))
-        {
-          if (_isRequestAllDescEnabled)
-            return _enterStateRequestTcpSrcDesc(msgHdr, num_bytes, reqMsg);
-          else if (_wantUdp)
-            return _enterStateRequestUdpSrc();
-          else
-            return _enterRunningState(msgHdr, num_bytes, reqMsg);
-        }
-        else
-        {
-          return _enterRunningState(msgHdr, num_bytes, reqMsg);
-        }
+        if (_wantTcp) _enterStateRequestTcpSrc();
+        else _enterStateRequestUdpSrc();
         break;
       }
-      case STATE_REQUEST_TCP_SRC_DESC:
+      case STATE_REQUEST_TCP_SRC:
       {
         if (isSuccessResponse || NOT_FATAL(err))
         {
@@ -754,9 +720,6 @@ private:
       {
         if (isSuccessResponse || NOT_FATAL(err))
         {
-          if (_isRequestAllDescEnabled)
-            return _enterStateRequestUdpSrcDesc(msgHdr, num_bytes, reqMsg);
-          else
             return _enterRunningState(msgHdr, num_bytes, reqMsg);
         }
         else
@@ -765,9 +728,6 @@ private:
         }
         break;
       }
-      case STATE_REQUEST_UDP_SRC_DESC:
-        return _enterRunningState(msgHdr, num_bytes, reqMsg);
-        break;
       default:
         // unexpected.  Enter passive listening state ... _getAndLogError() above logs error
         return _enterRunningState(msgHdr, num_bytes, reqMsg);
@@ -840,7 +800,10 @@ private:
         if (source != 0L) {
           _markSourceForRemove(source);
           removeFromWaitingForDescQueue(source);
-          _listener->onStreamRemoved(&source->obj);
+
+          if (!(source->obj.key.lport == 0 && source->obj.key.rport == 0)) {
+            _listener->onStreamRemoved(&source->obj);
+          }
         }
       }
       break;
@@ -851,27 +814,30 @@ private:
         if (source != 0L)
         {
           removeFromWaitingForDescQueue(source);
-          if (_structHandler->readSrcDesc(ns, num_bytes, &source->obj))
+
           {
-            source->_haveDesc = true;
+            if (_structHandler->readSrcDesc(ns, num_bytes, &source->obj))
+            {
+              source->_haveDesc = true;
 
-            // misc cleanups
+              // misc cleanups
 
-            if (source->obj.process.pid == 0) strcpy(source->obj.process.name, "kernel_task");
+              if (source->obj.process.pid == 0) strcpy(source->obj.process.name, "kernel_task");
 
-            // notify application (it not already done)
+              // notify application (it not already done)
 
-            if (!source->_haveNotifiedAdded) {
-              if (source->obj.key.lport == 0 && source->obj.key.rport == 0) {
-                // ignore... TODO: not sure what these are.
-              } else {
-                _listener->onStreamAdded(&source->obj);
+              if (!source->_haveNotifiedAdded) {
+                if (source->obj.key.lport == 0 && source->obj.key.rport == 0) {
+                  // ignore... TODO: not sure what these are.
+                } else {
+                  _listener->onStreamAdded(&source->obj);
+                }
               }
-            }
 
-            source->_haveNotifiedAdded = true;
-          } else {
-            LOG_DEBUG(("E not TCP or UDP provider:%u\n", providerId));
+              source->_haveNotifiedAdded = true;
+            } else {
+              LOG_DEBUG(("E not TCP or UDP provider:%u\n", providerId));
+            }
           }
         } else {
           LOG_ERROR(("desc before src defined\n"));
@@ -1107,7 +1073,6 @@ private:
   int                           _logFd;
   uint8_t                       _logFlags;
   
-  bool                          _isRequestAllDescEnabled;
   map<uint64_t, NetstatSource*> _mapWaitingForDesc;
   map<uint64_t, NetstatSource*> _mapWaitingForCount;
 

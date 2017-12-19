@@ -46,17 +46,24 @@ public:
 
   /*
    * write NSTAT_MSG_TYPE_ADD_ALL_SRCS for TCP or UDP
-   * @param wantKernel If true, include kernel traffic
-   *       (10.12 Sierra XNU v3789 gives a choice)
    */
-  virtual void writeAddAllTcpSrc(MsgDest &dest, bool wantKernel) = 0;
-  virtual void writeAddAllUdpSrc(MsgDest &dest, bool wantKernel) = 0;
+  virtual void writeAddAllTcpSrc(MsgDest &dest) = 0;
+  virtual void writeAddAllUdpSrc(MsgDest &dest) = 0;
+
+  /*
+   * Provider IDs are abstracted.  Some versions have multiple TCP and UDP.
+   * In v3789, UDP changes from 3 to 4.  Early versions don't have interface provider.
+   * Thus, we resort to querying.
+   */
+  virtual bool isProviderTcp(uint64_t providerId)=0;
+  virtual bool isProviderUdp(uint64_t providerId)=0;
 
   /*
    * write NSTAT_MSG_TYPE_QUERY_SRC
    */
   virtual void writeQuerySrc(MsgDest &dest, uint64_t srcRef) = 0;
 
+  
   /*
    * Extract from msg and populate srcRef and providerId (if in message).
    */

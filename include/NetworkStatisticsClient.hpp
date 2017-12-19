@@ -76,13 +76,10 @@ public:
    *
    * @param wantTcp If true, include TCP streams. Default: true.
    * @param wantUdp If true, include UDP streams. Default: false.
-   * @param wantKernel  Default: true.  MacOS 10.12 Sierra and later, provide the option to
-   *                filter KERNEL and USER traffic.  However, Sierra reports all TCP
-   *                as kernel traffic.
    * @param updateIntervalSeconds  Interval in seconds to receive stat updates on persistent
    *                               connections.  If zero, this feature is turned off. Default: 30.
    */
-  virtual void configure(bool wantTcp, bool wantUdp, bool wantKernel, uint32_t updateIntervalSeconds) = 0;
+  virtual void configure(bool wantTcp, bool wantUdp, uint32_t updateIntervalSeconds) = 0;
 
   /*
    * Will set the stop flag, so run() will exit.
@@ -168,6 +165,18 @@ struct NTStatStream
   NTStatStreamState  states;
 
 };
+
+/*
+#include <string>
+struct NTStatInterface
+{
+  std::string                     name;
+  uint32_t                        ifindex;
+  uint64_t                        threshold;
+  unsigned int                    type;
+  std::string                     description;
+};
+*/
 
 // convenience macros
 
