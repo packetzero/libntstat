@@ -2,7 +2,11 @@
 
 ### Introduction
 
-Darwin kernel provides an unpublished API to receive pseudo realtime notifications of network connections and stats. See [protocol.md](./docs/protocol.md) for details on the underlying mechanism and protocol.
+Darwin kernel provides an unpublished API to receive pseudo realtime notifications of network connections and stats. This is the same data that powers Activity Monitor.  See [protocol.md](./docs/protocol.md) for details on the underlying mechanism and protocol.  Feature summary:
+
+ - Receive Add, Stats, Remove on every TCP connection
+ - Gather cumulative network stats by process
+ - cannot UDP conversations.  Data only provides local port, no addresses
 
 ### Usage
 
@@ -36,4 +40,4 @@ XNU version:3789
 ```
 
 ### Credits
-This is based on lsock by Jonathan Levin (http://newosxbook.com/index.php?page=code).  There were several significant changes to the socket protocol in 10.12 Sierra (XNU v3789) that breaks lsock.
+This is based on lsock by Jonathan Levin (http://newosxbook.com/index.php?page=code).  There were several significant changes to the socket protocol in 10.12 Sierra (XNU v3789) that breaks lsock.  He said that an update to lsock is coming soon.
