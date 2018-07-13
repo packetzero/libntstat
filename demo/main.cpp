@@ -77,9 +77,9 @@ int main(int argc, const char * argv[])
   }
 
   // configure
-  bool wantTcp=true, wantUdp=false, wantKernel=true;
+  bool wantTcp=true, wantUdp=false;
   uint32_t updateIntervalSeconds = 60;
-  netstatClient->configure(wantTcp, wantUdp, wantKernel, updateIntervalSeconds);
+  netstatClient->configure(wantTcp, wantUdp, updateIntervalSeconds);
   
   // in a real app, we would want to run this in a dedicated thread
   netstatClient->run();
