@@ -1,5 +1,7 @@
 ## C++ library to receive network stats on MacOS (XNU Darwin)
 
+## NOTE: A user (Sunil-P) reported that the socket used is gone in Big Sur, so this method will not work.
+
 ### Introduction
 
 Darwin kernel provides an unpublished API to receive pseudo realtime notifications of network connections and stats. This is the same data that powers Activity Monitor.  See [protocol.md](./docs/protocol.md) for details on the underlying mechanism and protocol.  Feature summary:
